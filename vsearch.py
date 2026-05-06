@@ -515,12 +515,7 @@ def play_query(query, strict=True):
         return False
 
     url = videos[idx]["url"]
-    args = ["mpv"]
-
-    if load_settings().get("open_fullscreen", True):
-        args.append("--fs")
-
-    args.extend(["--force-window=yes", url])
+    args = build_mpv_args(url)
 
     print(f"\n▶️ Открываю:\n{url}\n")
     subprocess.run(args)
@@ -1157,6 +1152,171 @@ def main_menu():
             input("\nEnter чтобы вернуться...")
         else:
             print("❌ Нет такого пункта.")
+
+
+
+def shader_path(value):
+    if not value:
+        return None
+
+    path = Path(str(value)).expanduser()
+    return path if path.exists() else None
+
+
+def build_mpv_args(target):
+    st = load_settings()
+
+    args = ["mpv"]
+
+    if st.get("open_fullscreen", True):
+        args.append("--fs")
+
+    args.append("--force-window=yes")
+
+    upscale = st.get("upscale_mode", "off")
+    aspect = st.get("aspect_mode", "original")
+
+    if upscale == "anime":
+        restore = shader_path(st.get("anime4k_restore_shader"))
+        upscale_shader = shader_path(st.get("anime4k_upscale_shader"))
+
+        if restore:
+            args.append(f"--glsl-shader={restore}")
+
+        if upscale_shader:
+            args.append(f"--glsl-shader={upscale_shader}")
+
+        args.extend([
+            "--scale=ewa_lanczossharp",
+            "--cscale=ewa_lanczossharp",
+            "--dscale=mitchell",
+            "--correct-downscaling=yes",
+            "--sigmoid-upscaling=yes"
+        ])
+
+    elif upscale == "film":
+        args.extend([
+            "--scale=ewa_lanczossharp",
+            "--cscale=ewa_lanczossoft",
+            "--dscale=mitchell",
+            "--correct-downscaling=yes",
+            "--sigmoid-upscaling=yes",
+            "--deband=yes",
+            "--deband-iterations=2",
+            "--deband-threshold=48",
+            "--deband-range=16",
+            "--deband-grain=24"
+        ])
+
+    if aspect == "crop":
+        args.append("--panscan=1.0")
+
+    elif aspect == "stretch":
+        args.append("--video-aspect-override=16:9")
+
+    args.append(str(target))
+    return args
+
+
+def show_video_modes():
+    st = load_settings()
+
+    upscale = st.get("upscale_mode", "off")
+    aspect = st.get("aspect_mode", "original")
+
+    banner()
+
+    if RICH:
+        table = Table(title="⚙️ Видео-режимы", border_style="cyan")
+        table.add_column("Режим", style="bold cyan")
+        table.add_column("Значение", style="bold white")
+        table.add_row("Upscale", upscale)
+        table.add_row("Aspect", aspect)
+        console.print(table)
+
+        console.print(Panel(
+            "[bold cyan]vsearch -upscale off[/] — без апскейла\n"
+            "[bold cyan]vsearch -upscale anime[/] — Anime4K для аниме\n"
+            "[bold cyan]vsearch -upscale film[/] — мягкий режим для старых фильмов\n\n"
+            "[bold cyan]vsearch -aspect original[/] — оригинальный кадр\n"
+            "[bold cyan]vsearch -aspect crop[/] — заполнить экран без растяга\n"
+            "[bold cyan]vsearch -aspect stretch[/] — растянуть до 16:9",
+            title="Команды",
+            border_style="magenta"
+        ))
+    else:
+        print(f"Upscale: {upscale}")
+        print(f"Aspect: {aspect}")
+
+
+def set_upscale_mode(mode):
+    allowed = ["off", "anime", "film", "status"]
+
+    if mode not in allowed:
+        print("❌ Режимы: off / anime / film / status")
+        return
+
+    if mode == "status":
+        show_video_modes()
+        return
+
+    st = load_settings()
+    st["upscale_mode"] = mode
+    save_json(SETTINGS_FILE, st)
+
+    print(f"✅ Upscale режим: {mode}")
+
+
+def set_aspect_mode(mode):
+    allowed = ["original", "crop", "stretch", "status"]
+
+    if mode not in allowed:
+        print("❌ Режимы: original / crop / stretch / status")
+        return
+
+    if mode == "status":
+        show_video_modes()
+        return
+
+    st = load_settings()
+    st["aspect_mode"] = mode
+    save_json(SETTINGS_FILE, st)
+
+    print(f"✅ Aspect режим: {mode}")
+
+
+def video_modes_menu():
+    while True:
+        show_video_modes()
+
+        print("\n1. Upscale: off")
+        print("2. Upscale: anime")
+        print("3. Upscale: film")
+        print("4. Aspect: original")
+        print("5. Aspect: crop")
+        print("6. Aspect: stretch")
+        print("0. Назад")
+
+        choice = input("\nВыбор: ").strip()
+
+        if choice == "0":
+            return
+        elif choice == "1":
+            set_upscale_mode("off")
+        elif choice == "2":
+            set_upscale_mode("anime")
+        elif choice == "3":
+            set_upscale_mode("film")
+        elif choice == "4":
+            set_aspect_mode("original")
+        elif choice == "5":
+            set_aspect_mode("crop")
+        elif choice == "6":
+            set_aspect_mode("stretch")
+        else:
+            print("❌ Нет такого пункта.")
+
+        input("\nEnter...")
 
 
 def help_text():
