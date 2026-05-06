@@ -517,7 +517,9 @@ def play_query(query, strict=True):
     url = videos[idx]["url"]
     args = build_mpv_args(url)
 
-    print(f"\n▶️ Открываю:\n{url}\n")
+    st = load_settings()
+    print(f"\n⚙️ Upscale: {st.get('upscale_mode', 'off')} | Aspect: {st.get('aspect_mode', 'original')}")
+    print(f"▶️ Открываю:\n{url}\n")
     subprocess.run(args)
 
     return True
@@ -1205,7 +1207,8 @@ def build_mpv_args(target):
             "--deband-iterations=2",
             "--deband-threshold=48",
             "--deband-range=16",
-            "--deband-grain=24"
+            "--deband-grain=24",
+            "--vf-add=lavfi=[unsharp=5:5:0.6:3:3:0.3]"
         ])
 
     if aspect == "crop":
