@@ -528,10 +528,11 @@ def play_query(query, strict=True):
         return False
 
     url = videos[idx]["url"]
-    args = build_mpv_args(url)
+    args = build_mpv_args(url, title=query)
 
     st = load_settings()
-    print(f"\n⚙️ Upscale: {st.get('upscale_mode', 'off')} | Aspect: {st.get('aspect_mode', 'original')}")
+    real_upscale = effective_upscale_mode(query)
+    print(f"\n⚙️ Upscale: {st.get('upscale_mode', 'auto')} → {real_upscale} | Aspect: {st.get('aspect_mode', 'original')}")
     print(f"▶️ Открываю:\n{url}\n")
     subprocess.run(args)
 
@@ -1170,6 +1171,89 @@ def main_menu():
 
 
 
+
+def extract_year_from_text(text):
+    m = re.search(r'\b(19[0-9]{2}|20[0-2][0-9])\b', str(text))
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def year_from_hints(query):
+    for hint in hints_for(query):
+        if str(hint).isdigit() and len(str(hint)) == 4:
+            return int(hint)
+    return None
+
+
+def detect_auto_upscale_mode(title):
+    q = key(title)
+
+    animation_words = [
+        "мультфильм", "аниме", "animation", "animated",
+        "шрек", "shrek",
+        "история игрушек", "toy story",
+        "корпорация монстров", "monsters inc", "университет монстров",
+        "как приручить дракона",
+        "кунг-фу панда",
+        "ледниковый период",
+        "гадкий я", "миньоны",
+        "мадагаскар",
+        "тачки",
+        "суперсемейка",
+        "монстры на каникулах",
+        "в поисках немо", "в поисках дори",
+        "ральф",
+        "зверополис",
+        "призрак в доспехах",
+        "акира",
+        "паприка",
+        "идеальная грусть",
+        "метрополис",
+        "аниматрица",
+        "ковбой бибоп",
+        "ангельское яйцо",
+        "навсикая",
+        "евангелион"
+    ]
+
+    if any(w in q for w in animation_words):
+        return "anime"
+
+    year = year_from_hints(title) or extract_year_from_text(title)
+
+    if year and year <= 2005:
+        return "film"
+
+    old_film_words = [
+        "тарковский", "кубри",
+        "линч", "карпентер", "кроненберг",
+        "скорсезе", "балабанов",
+        "солярис", "сталкер", "робокоп", "чужой", "чужие",
+        "терминатор", "видеодром", "таксист",
+        "бегущий по лезвию", "назад в будущее",
+        "безумный макс", "кин-дза-дза", "брат"
+    ]
+
+    if any(w in q for w in old_film_words):
+        return "film"
+
+    return "off"
+
+
+def effective_upscale_mode(title):
+    st = load_settings()
+    mode = st.get("upscale_mode", "auto")
+
+    if mode == "auto":
+        return detect_auto_upscale_mode(title)
+
+    return mode
+
+
 def shader_path(value):
     if not value:
         return None
@@ -1178,7 +1262,7 @@ def shader_path(value):
     return path if path.exists() else None
 
 
-def build_mpv_args(target):
+def build_mpv_args(target, title=None):
     st = load_settings()
 
     args = ["mpv"]
@@ -1188,7 +1272,9 @@ def build_mpv_args(target):
 
     args.append("--force-window=yes")
 
-    upscale = st.get("upscale_mode", "off")
+    title_for_detect = title or target
+
+    upscale = effective_upscale_mode(title_for_detect)
     aspect = st.get("aspect_mode", "original")
 
     if upscale == "anime":
@@ -1234,6 +1320,7 @@ def build_mpv_args(target):
     return args
 
 
+
 def show_video_modes():
     st = load_settings()
 
@@ -1266,10 +1353,10 @@ def show_video_modes():
 
 
 def set_upscale_mode(mode):
-    allowed = ["off", "anime", "film", "status"]
+    allowed = ["auto", "off", "anime", "film", "status"]
 
     if mode not in allowed:
-        print("❌ Режимы: off / anime / film / status")
+        print("❌ Режимы: auto / off / anime / film / status")
         return
 
     if mode == "status":
@@ -1305,12 +1392,13 @@ def video_modes_menu():
     while True:
         show_video_modes()
 
-        print("\n1. Upscale: off")
-        print("2. Upscale: anime")
-        print("3. Upscale: film")
-        print("4. Aspect: original")
-        print("5. Aspect: crop")
-        print("6. Aspect: stretch")
+        print("\n1. Upscale: auto")
+        print("2. Upscale: off")
+        print("3. Upscale: anime")
+        print("4. Upscale: film")
+        print("5. Aspect: original")
+        print("6. Aspect: crop")
+        print("7. Aspect: stretch")
         print("0. Назад")
 
         choice = input("\nВыбор: ").strip()
@@ -1318,16 +1406,18 @@ def video_modes_menu():
         if choice == "0":
             return
         elif choice == "1":
-            set_upscale_mode("off")
+            set_upscale_mode("auto")
         elif choice == "2":
-            set_upscale_mode("anime")
+            set_upscale_mode("off")
         elif choice == "3":
-            set_upscale_mode("film")
+            set_upscale_mode("anime")
         elif choice == "4":
-            set_aspect_mode("original")
+            set_upscale_mode("film")
         elif choice == "5":
-            set_aspect_mode("crop")
+            set_aspect_mode("original")
         elif choice == "6":
+            set_aspect_mode("crop")
+        elif choice == "7":
             set_aspect_mode("stretch")
         else:
             print("❌ Нет такого пункта.")
