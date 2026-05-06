@@ -8,6 +8,7 @@ from pathlib import Path
 from datetime import datetime
 
 import requests
+import re
 
 try:
     from rich.console import Console
@@ -1925,6 +1926,501 @@ def main():
     else:
         print("❌ Неизвестная команда.")
         help_text()
+
+
+
+# === VSEARCH_MOVIE_FILTER_PATCH_V1 START ===
+# Фильтр качества поиска: оставляет фильмы выше, выкидывает клипы/OST/трейлеры/обзоры.
+import re as _vsearch_re
+
+_VSEARCH_BAD_MEDIA_WORDS = [
+    "trailer", "teaser", "тизер", "трейлер",
+    "ost", "soundtrack", "score", "theme", "main theme",
+    "music video", "official video", "клип", "песня", "трек",
+    "lyrics", "lyric", "instrumental", "remix", "cover",
+    "reaction", "реакция", "review", "обзор", "recap", "пересказ",
+    "explained", "разбор", "ending explained",
+    "behind the scenes", "making of", "интервью",
+    "scene", "clip", "фрагмент", "отрывок",
+    "gameplay", "walkthrough", "прохождение",
+]
+
+_VSEARCH_GOOD_MEDIA_WORDS = [
+    "фильм", "полный фильм", "кино",
+    "movie", "full movie", "film",
+    "1080p", "720p", "2160p", "4k",
+    "bdrip", "hdrip", "webrip", "web-dl", "blu-ray", "bluray",
+]
+
+def _vsearch_item_title(item):
+    if isinstance(item, dict):
+        return str(
+            item.get("title")
+            or item.get("name")
+            or item.get("fulltitle")
+            or item.get("webpage_url")
+            or item
+        )
+    return str(item)
+
+def _vsearch_item_duration(item):
+    if not isinstance(item, dict):
+        return None
+    d = item.get("duration")
+    try:
+        if d is None:
+            return None
+        return int(float(d))
+    except Exception:
+        return None
+
+def _vsearch_bad_title(title):
+    low = str(title).lower()
+
+    for word in _VSEARCH_BAD_MEDIA_WORDS:
+        if word in low:
+            return True
+
+    # Частые мусорные варианты: "Title OST", "Title - Theme", "Title trailer 4K"
+    if _vsearch_re.search(r"\b(ost|theme|trailer|teaser|lyrics|remix|cover)\b", low):
+        return True
+
+    # Музыкальные обозначения
+    if _vsearch_re.search(r"\b(audio|official audio|visualizer|music)\b", low):
+        return True
+
+    return False
+
+def _vsearch_good_title(title):
+    low = str(title).lower()
+
+    if any(word in low for word in _VSEARCH_GOOD_MEDIA_WORDS):
+        return True
+
+    # Год в названии часто помогает отсеять фильм от мусора
+    if _vsearch_re.search(r"\b(19[0-9]{2}|20[0-2][0-9])\b", low):
+        return True
+
+    return False
+
+def _vsearch_movie_score(item):
+    title = _vsearch_item_title(item)
+    low = title.lower()
+    duration = _vsearch_item_duration(item)
+
+    score = 0
+
+    if _vsearch_bad_title(title):
+        return -999999
+
+    if duration is not None:
+        # меньше 40 минут почти всегда не фильм
+        if duration < 40 * 60 and not _vsearch_good_title(title):
+            return -999998
+
+        # полный метр выше
+        if duration >= 70 * 60:
+            score += 80
+        elif duration >= 40 * 60:
+            score += 35
+
+    for word in _VSEARCH_GOOD_MEDIA_WORDS:
+        if word in low:
+            score += 12
+
+    if _vsearch_re.search(r"\b(19[0-9]{2}|20[0-2][0-9])\b", low):
+        score += 10
+
+    # Немного штрафуем очевидно короткий мусор даже без duration
+    weak_bad = ["shorts", "#shorts", "tik tok", "tiktok", "edit", "эдит"]
+    if any(x in low for x in weak_bad):
+        score -= 50
+
+    return score
+
+def _vsearch_filter_movie_results(result):
+    if not isinstance(result, list):
+        return result
+
+    if not result:
+        return result
+
+    # Фильтруем только списки, похожие на поисковые результаты.
+    looks_like_results = False
+    for item in result[:8]:
+        if isinstance(item, dict) and ("title" in item or "name" in item or "duration" in item or "url" in item or "webpage_url" in item):
+            looks_like_results = True
+            break
+
+    if not looks_like_results:
+        return result
+
+    scored = []
+    for item in result:
+        score = _vsearch_movie_score(item)
+        if score <= -999000:
+            continue
+        scored.append((score, item))
+
+    # Если фильтр случайно выкинул всё — лучше вернуть старый список, чем сломать поиск.
+    if not scored:
+        return result
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [item for score, item in scored]
+
+def _vsearch_install_movie_filter():
+    # Оборачиваем только функции поиска, а не меню/плеер/марафоны.
+    keys = list(globals().keys())
+
+    for name in keys:
+        low = name.lower()
+
+        if not any(k in low for k in ["search", "ytsearch", "find"]):
+            continue
+
+        if name.startswith("_vsearch_"):
+            continue
+
+        fn = globals().get(name)
+
+        if not callable(fn):
+            continue
+
+        if getattr(fn, "_vsearch_movie_filter_wrapped", False):
+            continue
+
+        def make_wrapper(old_fn):
+            def wrapper(*args, **kwargs):
+                result = old_fn(*args, **kwargs)
+                return _vsearch_filter_movie_results(result)
+            wrapper.__name__ = getattr(old_fn, "__name__", "wrapped")
+            wrapper.__doc__ = getattr(old_fn, "__doc__", None)
+            wrapper._vsearch_movie_filter_wrapped = True
+            return wrapper
+
+        globals()[name] = make_wrapper(fn)
+
+_vsearch_install_movie_filter()
+# === VSEARCH_MOVIE_FILTER_PATCH_V1 END ===
+
+
+
+# === VSEARCH_SAFE_UPGRADES_V1 START ===
+# 3: умный детект названий через titles.json
+# 5: --backup и --restore-latest
+# 9: bad_words.txt для чистки мусорных результатов
+import sys as _vsearch_sys
+import json as _vsearch_json
+import tarfile as _vsearch_tarfile
+import time as _vsearch_time
+import shutil as _vsearch_shutil
+import re as _vsearch_re
+from pathlib import Path as _VSearchPath
+
+_VSEARCH_HOME = _VSearchPath.home()
+_VSEARCH_BIN = _VSEARCH_HOME / ".local/bin/vsearch"
+_VSEARCH_CFG = _VSEARCH_HOME / ".config/vsearch"
+_VSEARCH_DATA = _VSEARCH_HOME / ".local/share/vsearch"
+_VSEARCH_BACKUPS = _VSEARCH_DATA / "backups"
+_VSEARCH_TITLES = _VSEARCH_CFG / "titles.json"
+_VSEARCH_BAD_WORDS = _VSEARCH_CFG / "bad_words.txt"
+
+def _vsearch_load_json_file(path, fallback):
+    try:
+        return _vsearch_json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return fallback
+
+def _vsearch_load_bad_words():
+    if not _VSEARCH_BAD_WORDS.exists():
+        return []
+    return [
+        x.strip().lower()
+        for x in _VSEARCH_BAD_WORDS.read_text(encoding="utf-8", errors="ignore").splitlines()
+        if x.strip() and not x.strip().startswith("#")
+    ]
+
+def _vsearch_create_backup():
+    _VSEARCH_BACKUPS.mkdir(parents=True, exist_ok=True)
+    stamp = _vsearch_time.strftime("%Y%m%d_%H%M%S")
+    out = _VSEARCH_BACKUPS / f"vsearch-full-backup-{stamp}.tar.gz"
+
+    with _vsearch_tarfile.open(out, "w:gz") as tar:
+        if _VSEARCH_BIN.exists():
+            tar.add(_VSEARCH_BIN, arcname="vsearch")
+        if _VSEARCH_CFG.exists():
+            tar.add(_VSEARCH_CFG, arcname="config-vsearch")
+        if _VSEARCH_DATA.exists():
+            tar.add(_VSEARCH_DATA, arcname="share-vsearch")
+
+    print("✅ Бэкап создан:", out)
+    return out
+
+def _vsearch_restore_latest():
+    if not _VSEARCH_BACKUPS.exists():
+        print("❌ Бэкапов нет:", _VSEARCH_BACKUPS)
+        return
+
+    backups = sorted(_VSEARCH_BACKUPS.glob("vsearch-full-backup-*.tar.gz"), reverse=True)
+    if not backups:
+        print("❌ Бэкапов нет:", _VSEARCH_BACKUPS)
+        return
+
+    latest = backups[0]
+    temp = _VSEARCH_BACKUPS / "_restore_tmp"
+
+    if temp.exists():
+        _vsearch_shutil.rmtree(temp)
+
+    temp.mkdir(parents=True, exist_ok=True)
+
+    with _vsearch_tarfile.open(latest, "r:gz") as tar:
+        tar.extractall(temp)
+
+    restored_bin = temp / "vsearch"
+    restored_cfg = temp / "config-vsearch"
+    restored_data = temp / "share-vsearch"
+
+    if restored_bin.exists():
+        _VSEARCH_BIN.write_text(restored_bin.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+        _VSEARCH_BIN.chmod(0o755)
+
+    if restored_cfg.exists():
+        if _VSEARCH_CFG.exists():
+            _vsearch_shutil.rmtree(_VSEARCH_CFG)
+        _vsearch_shutil.copytree(restored_cfg, _VSEARCH_CFG)
+
+    if restored_data.exists():
+        if _VSEARCH_DATA.exists():
+            _vsearch_shutil.rmtree(_VSEARCH_DATA)
+        _vsearch_shutil.copytree(restored_data, _VSEARCH_DATA)
+
+    _vsearch_shutil.rmtree(temp, ignore_errors=True)
+    print("✅ Восстановлено из:", latest)
+
+def _vsearch_enrich_query(query):
+    q = str(query).strip()
+    if not q:
+        return query
+
+    titles = _vsearch_load_json_file(_VSEARCH_TITLES, {})
+    if not isinstance(titles, dict):
+        return query
+
+    low = q.lower()
+
+    found_key = None
+    found_meta = None
+
+    for key, meta in titles.items():
+        ru = ""
+        if isinstance(meta, dict):
+            ru = str(meta.get("ru", ""))
+
+        if low == str(key).lower() or (ru and low == ru.lower()):
+            found_key = key
+            found_meta = meta
+            break
+
+    if not found_key or not isinstance(found_meta, dict):
+        return query
+
+    year = found_meta.get("year")
+    ru = found_meta.get("ru")
+    typ = found_meta.get("type", "movie")
+
+    extra = []
+
+    if year and str(year) not in q:
+        extra.append(str(year))
+
+    if ru and str(ru).lower() not in low:
+        extra.append(str(ru))
+
+    if typ == "movie":
+        extra.extend(["фильм", "movie"])
+
+    # Не превращаем запрос в кашу, только добавляем подсказки.
+    enriched = q + " " + " ".join(extra)
+    return enriched.strip()
+
+def _vsearch_item_title(item):
+    if isinstance(item, dict):
+        return str(
+            item.get("title")
+            or item.get("name")
+            or item.get("fulltitle")
+            or item.get("webpage_url")
+            or item
+        )
+    return str(item)
+
+def _vsearch_item_duration(item):
+    if not isinstance(item, dict):
+        return None
+    try:
+        d = item.get("duration")
+        if d is None:
+            return None
+        return int(float(d))
+    except Exception:
+        return None
+
+def _vsearch_bad_result(item):
+    title = _vsearch_item_title(item).lower()
+    duration = _vsearch_item_duration(item)
+    bad_words = _vsearch_load_bad_words()
+
+    for word in bad_words:
+        if word in title:
+            return True
+
+    if duration is not None:
+        # меньше 35 минут почти всегда не фильм, если явно не написано full movie / полный фильм
+        if duration < 35 * 60 and "full movie" not in title and "полный фильм" not in title:
+            return True
+
+    return False
+
+def _vsearch_result_score(item):
+    title = _vsearch_item_title(item).lower()
+    duration = _vsearch_item_duration(item)
+
+    if _vsearch_bad_result(item):
+        return -999999
+
+    score = 0
+
+    good_words = [
+        "full movie",
+        "полный фильм",
+        "фильм",
+        "movie",
+        "film",
+        "1080p",
+        "720p",
+        "2160p",
+        "4k",
+        "bdrip",
+        "hdrip",
+        "webrip",
+        "web-dl",
+        "bluray",
+        "blu-ray",
+    ]
+
+    for word in good_words:
+        if word in title:
+            score += 15
+
+    if _vsearch_re.search(r"\b(19[0-9]{2}|20[0-2][0-9])\b", title):
+        score += 10
+
+    if duration is not None:
+        if duration >= 70 * 60:
+            score += 90
+        elif duration >= 45 * 60:
+            score += 45
+
+    return score
+
+def _vsearch_filter_results(result):
+    if not isinstance(result, list):
+        return result
+
+    if not result:
+        return result
+
+    looks_like_search_results = False
+
+    for item in result[:10]:
+        if isinstance(item, dict) and (
+            "title" in item
+            or "name" in item
+            or "duration" in item
+            or "url" in item
+            or "webpage_url" in item
+        ):
+            looks_like_search_results = True
+            break
+
+    if not looks_like_search_results:
+        return result
+
+    scored = []
+
+    for item in result:
+        score = _vsearch_result_score(item)
+        if score <= -999000:
+            continue
+        scored.append((score, item))
+
+    # Если всё выкинуло — возвращаем обычные результаты, чтобы поиск не умер.
+    if not scored:
+        return result
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [item for score, item in scored]
+
+def _vsearch_install_safe_upgrades():
+    # Оборачиваем play_query: добавляем год/русское название/тип из titles.json.
+    if "play_query" in globals() and callable(globals()["play_query"]):
+        old_play_query = globals()["play_query"]
+
+        if not getattr(old_play_query, "_vsearch_safe_wrapped", False):
+            def play_query_wrapper(query, *args, **kwargs):
+                return old_play_query(_vsearch_enrich_query(query), *args, **kwargs)
+
+            play_query_wrapper._vsearch_safe_wrapped = True
+            play_query_wrapper.__name__ = getattr(old_play_query, "__name__", "play_query")
+            globals()["play_query"] = play_query_wrapper
+
+    # Оборачиваем поисковые функции: чистим трейлеры/OST/клипы/обзоры из результатов.
+    for name, fn in list(globals().items()):
+        low = name.lower()
+
+        if name.startswith("_vsearch_"):
+            continue
+
+        if not callable(fn):
+            continue
+
+        if getattr(fn, "_vsearch_filter_wrapped", False):
+            continue
+
+        if not any(k in low for k in ["search", "find", "ytsearch"]):
+            continue
+
+        def make_wrapper(old_fn):
+            def wrapper(*args, **kwargs):
+                return _vsearch_filter_results(old_fn(*args, **kwargs))
+            wrapper._vsearch_filter_wrapped = True
+            wrapper.__name__ = getattr(old_fn, "__name__", "wrapped_search")
+            return wrapper
+
+        globals()[name] = make_wrapper(fn)
+
+    # Оборачиваем main: добавляем --backup и --restore-latest.
+    if "main" in globals() and callable(globals()["main"]):
+        old_main = globals()["main"]
+
+        if not getattr(old_main, "_vsearch_main_wrapped", False):
+            def main_wrapper(*args, **kwargs):
+                if "--backup" in _vsearch_sys.argv:
+                    _vsearch_create_backup()
+                    raise SystemExit(0)
+                if "--restore-latest" in _vsearch_sys.argv:
+                    _vsearch_restore_latest()
+                    raise SystemExit(0)
+                return old_main(*args, **kwargs)
+
+            main_wrapper._vsearch_main_wrapped = True
+            main_wrapper.__name__ = getattr(old_main, "__name__", "main")
+            globals()["main"] = main_wrapper
+
+_vsearch_install_safe_upgrades()
+# === VSEARCH_SAFE_UPGRADES_V1 END ===
 
 
 if __name__ == "__main__":

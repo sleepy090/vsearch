@@ -108,3 +108,7 @@ Kingsman => Kingsman: Секретная служба / Kingsman: Золотое
 В поисках Немо => В поисках Немо / В поисках Дори
 Ральф => Ральф / Ральф против интернета
 Зверополис => Зверополис
+
+Гик Трип => 2001 A Space Odyssey 1968 / Star Wars Episode IV A New Hope 1977 / Star Wars Episode V The Empire Strikes Back 1980 / Star Wars Episode VI Return of the Jedi 1983 / Star Trek II The Wrath of Khan 1982 / Blade Runner 1982 / Akira 1988 / Ghost in the Shell 1995 / The Matrix 1999 / Alien 1979 / Aliens 1986 / The Thing 1982 / RoboCop 1987 / Terminator 2 Judgment Day 1991 / Back to the Future 1985 / Tron 1982 / Brazil 1985 / Gattaca 1997 / 12 Monkeys 1995 / Dark City 1998 / Primer 2004 / Pi 1998 / Fight Club 1999 / The Big Lebowski 1998 / Office Space 1999 / Scott Pilgrim vs the World 2010
+Киберпанк и техно-паранойя => Blade Runner 1982 / Akira 1988 / Ghost in the Shell 1995 / The Matrix 1999 / Dark City 1998 / Videodrome 1983 / eXistenZ 1999 / RoboCop 1987 / Gattaca 1997 / Tron 1982
+Brainfuck кино => Primer 2004 / Pi 1998 / Memento 2000 / 12 Monkeys 1995 / Eternal Sunshine of the Spotless Mind 2004 / Donnie Darko 2001 / Being John Malkovich 1999

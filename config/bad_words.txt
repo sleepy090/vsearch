@@ -1,67 +1,89 @@
-трейлер
-trailer
-тизер
-teaser
-обзор
-review
-реакция
-reaction
 разбор
-пересказ
-краткий пересказ
-нарезка
-сцена
-лучшие моменты
-ost
-саундтрек
-клип
-clip
-behind the scenes
-интервью
-shorts
-short
-эдит
-edit
-топ
-объяснение
-заставка
-интро
-intro
-опенинг
-opening
-эндинг
-ending
-фрагмент
-отрывок
-кратко
-прохождение
-прохождения
-gameplay
-летсплей
-letsplay
-let's play
-стрим
 stream
-игрофильм
-аудиокнига
-аудиокниги
-озвучка
-мод
-модификация
-anomaly
+прохождения
+пересказ
+фрагмент
+letsplay
+саундтрек
+#2
+кратко
+обзор
 gamma
-shadow of chernobyl
-зов припяти
-чистое небо
-сердце чернобыля
-heart of chornobyl
+отрывок
+ost
+clip
+review
+reaction
+#1
+intro
+ending
 stalker 2
 s.t.a.l.k.e.r
-100 дней
-#1
-#2
+trailer
 #3
 #4
-#5
-часть 1 прохождение
+short
+краткий пересказ
+аудиокниги
+сердце чернобыля
+let's play
+стрим
+heart of chornobyl
+teaser
 полное прохождение
+shorts
+opening
+gameplay
+объяснение
+топ
+летсплей
+озвучка
+shadow of chernobyl
+100 дней
+трейлер
+чистое небо
+сцена
+интро
+лучшие моменты
+эдит
+behind the scenes
+edit
+аудиокнига
+anomaly
+модификация
+прохождение
+часть 1 прохождение
+тизер
+эндинг
+нарезка
+интервью
+#5
+заставка
+опенинг
+зов припяти
+клип
+мод
+игрофильм
+реакция
+soundtrack
+score
+theme
+main theme
+music video
+official video
+песня
+трек
+lyrics
+lyric
+instrumental
+remix
+cover
+recap
+explained
+ending explained
+making of
+scene
+#shorts
+tiktok
+tik tok
+walkthrough
