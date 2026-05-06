@@ -1732,6 +1732,16 @@ vsearch — кино-комбайн
   vsearch -sset "Во все тяжкие" 2 5
   vsearch -sdel "Во все тяжкие"
 
+Сериалы:
+  vsearch -series
+  vsearch -slist
+  vsearch -sadd "Во все тяжкие"
+  vsearch -sadd "Во все тяжкие" 2 5
+  vsearch -snext "Во все тяжкие"
+  vsearch -sdone "Во все тяжкие"
+  vsearch -sset "Во все тяжкие" 2 5
+  vsearch -sdel "Во все тяжкие"
+
 Марафоны:
   vsearch -marathons
   vsearch -marathon "Хоррор"
