@@ -390,6 +390,19 @@ def result_score(movie_query, video_title, duration):
         if "1979" in t or "тарковский" in t:
             score += 150
 
+    # если ищем базовый фильм без номера, не поднимать сиквелы выше оригинала
+    base_shrek_query = q in ["шрек", "shrek"]
+    if base_shrek_query:
+        if "2001" in t:
+            score += 120
+        sequel_words = [
+            "шрек 2", "shrek 2", "шрек третий", "shrek the third",
+            "шрек 3", "шрек навсегда", "shrek forever after",
+            "шрек 4", "2010", "2007", "2004"
+        ]
+        if any(w in t for w in sequel_words):
+            score -= 180
+
     return score
 
 
