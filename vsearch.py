@@ -225,7 +225,41 @@ def parse_duration(value):
 
 def is_bad_result(title):
     low = title.lower()
-    return any(word in low for word in load_bad_words())
+
+    extra_bad = [
+        "заставка",
+        "интро",
+        "intro",
+        "opening",
+        "опенинг",
+        "ending",
+        "эндинг",
+        "нарезка",
+        "фрагмент",
+        "отрывок",
+        "момент",
+        "сцена",
+        "лучшие сцены",
+        "лучшие моменты",
+        "трейлер",
+        "тизер",
+        "обзор",
+        "реакция",
+        "пересказ",
+        "кратко",
+        "объяснение",
+        "эдит",
+        "edit",
+        "shorts",
+        "short",
+        "саундтрек",
+        "ost",
+        "клип",
+        "интервью",
+        "behind the scenes"
+    ]
+
+    return any(word in low for word in load_bad_words() + extra_bad)
 
 
 def result_score(movie_query, video_title, duration):
@@ -233,23 +267,51 @@ def result_score(movie_query, video_title, duration):
     t = key(video_title)
     score = 0
 
-    if q in t:
-        score += 40
+    # Чем точнее название, тем выше результат
+    if q == t:
+        score += 80
+    elif q in t:
+        score += 50
 
     q_words = [w for w in q.split() if len(w) > 2]
+    matched = 0
     for w in q_words:
         if w in t:
-            score += 3
+            matched += 1
+            score += 5
 
-    good_words = ["фильм", "полный", "смотреть", "hd", "1080", "720"]
+    if q_words and matched == len(q_words):
+        score += 20
+
+    # Признаки нормальной полной версии
+    good_words = [
+        "фильм", "полный фильм", "смотреть онлайн", "hd",
+        "1080", "720", "full", "movie", "без рекламы"
+    ]
     for w in good_words:
         if w in t:
-            score += 2
+            score += 4
 
+    # Чем ближе к длине нормального фильма, тем лучше
     if duration >= 60 * 60:
-        score += 20
+        score += 35
+    elif 40 * 60 <= duration < 60 * 60:
+        score += 10
+    elif 0 < duration < 40 * 60:
+        score -= 50
     elif duration == 0:
-        score += 3
+        score -= 5
+
+    # Сильный штраф за мусорные форматы
+    bad_hints = [
+        "заставка", "интро", "опенинг", "ending", "эндинг",
+        "трейлер", "тизер", "обзор", "реакция", "разбор",
+        "пересказ", "нарезка", "сцена", "фрагмент", "отрывок",
+        "эдит", "edit", "shorts", "клип", "ost", "саундтрек"
+    ]
+    for w in bad_hints:
+        if w in t:
+            score -= 100
 
     return score
 
@@ -410,8 +472,8 @@ def show_watchlist_once(items=None, page=0, filter_text=""):
 
         console.print(table)
         console.print(Panel(
-            "[bold cyan]132[/] — включить фильм №132\n"
-            "[bold cyan]/сталкер[/] — фильтр по названию\n"
+            "[bold cyan]номер[/] — включить фильм по номеру\n"
+            "[bold cyan]/текст[/] — фильтр по названию\n"
             "[bold cyan]n[/] — следующая страница | [bold cyan]p[/] — прошлая\n"
             "[bold cyan]done 132[/] — отметить просмотренным\n"
             "[bold cyan]clear[/] — убрать фильтр | [bold cyan]b[/] — назад",
@@ -422,7 +484,7 @@ def show_watchlist_once(items=None, page=0, filter_text=""):
         print(f"\n🎬 Список фильмов — страница {page + 1}/{total_pages}\n")
         for real_num, item in visible:
             print(f"{real_num}. {item['title']}")
-        print("\n132 = включить | /текст = фильтр | n/p = страницы | b = назад")
+        print("\nномер = включить | /текст = фильтр | n/p = страницы | b = назад")
 
     return page, total_pages, filtered
 
@@ -1014,7 +1076,7 @@ vsearch — кино-комбайн
 Фильмы:
   vsearch
   vsearch -list
-  vsearch -list 132
+  vsearch -list 10
   vsearch -add "Фильм 1 / Фильм 2"
   vsearch -done 1
   vsearch -rate 1 9
