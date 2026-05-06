@@ -1289,6 +1289,21 @@ def main():
         save_mqueue([])
         print("🧹 Очередь марафонов очищена.")
 
+    elif cmd == "-upscale":
+        if len(args) < 2:
+            show_video_modes()
+        else:
+            set_upscale_mode(args[1].lower())
+
+    elif cmd == "-aspect":
+        if len(args) < 2:
+            show_video_modes()
+        else:
+            set_aspect_mode(args[1].lower())
+
+    elif cmd == "-video":
+        show_video_modes()
+
     elif cmd in ["-h", "--help", "-help"]:
         help_text()
 
