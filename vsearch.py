@@ -1425,6 +1425,277 @@ def video_modes_menu():
         input("\nEnter...")
 
 
+
+SERIES_DB = Path.home() / ".local/share/vsearch/series.json"
+
+
+def load_series():
+    if not SERIES_DB.exists():
+        return []
+
+    try:
+        return json.loads(SERIES_DB.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def save_series(data):
+    SERIES_DB.parent.mkdir(parents=True, exist_ok=True)
+    SERIES_DB.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def series_key(text):
+    return " ".join(str(text).lower().replace("ё", "е").split())
+
+
+def find_series_index(title):
+    q = series_key(title)
+    data = load_series()
+
+    for i, item in enumerate(data):
+        name = series_key(item.get("title", ""))
+
+        if q == name or q in name or name in q:
+            return i
+
+    return None
+
+
+def episode_query(item):
+    title = item.get("title", "")
+    season = int(item.get("season", 1))
+    episode = int(item.get("episode", 1))
+    template = item.get("template", "{title} {season} сезон {episode} серия")
+
+    return template.format(
+        title=title,
+        season=season,
+        episode=episode,
+        s=season,
+        e=episode
+    )
+
+
+def show_series():
+    data = load_series()
+    banner()
+
+    if not data:
+        print('Сериалов пока нет. Добавить: vsearch -sadd "Во все тяжкие"')
+        return
+
+    if RICH:
+        table = Table(title="📺 Сериалы", border_style="cyan")
+        table.add_column("№", justify="right", style="bold cyan")
+        table.add_column("Название", style="bold white")
+        table.add_column("Следующая серия", style="yellow")
+        table.add_column("Просмотрено", justify="right", style="green")
+
+        for i, item in enumerate(data, 1):
+            table.add_row(
+                str(i),
+                item.get("title", "Без названия"),
+                f'{item.get("season", 1)} сезон {item.get("episode", 1)} серия',
+                str(item.get("watched", 0))
+            )
+
+        console.print(table)
+    else:
+        for i, item in enumerate(data, 1):
+            print(f'{i}. {item.get("title")} — {item.get("season", 1)} сезон {item.get("episode", 1)} серия')
+
+
+def add_series(title, season=1, episode=1):
+    data = load_series()
+
+    if find_series_index(title) is not None:
+        print("⚠️ Такой сериал уже есть.")
+        return
+
+    data.append({
+        "title": title,
+        "season": int(season),
+        "episode": int(episode),
+        "watched": 0,
+        "added_at": now(),
+        "last_watched_at": None,
+        "template": "{title} {season} сезон {episode} серия"
+    })
+
+    save_series(data)
+    print(f"✅ Сериал добавлен: {title} — {season} сезон {episode} серия")
+
+
+def set_series_progress(title, season, episode):
+    data = load_series()
+    idx = find_series_index(title)
+
+    if idx is None:
+        print("❌ Сериал не найден.")
+        return
+
+    data[idx]["season"] = int(season)
+    data[idx]["episode"] = int(episode)
+
+    save_series(data)
+    print(f'✅ Прогресс обновлён: {data[idx]["title"]} — {season} сезон {episode} серия')
+
+
+def mark_series_done(title):
+    data = load_series()
+    idx = find_series_index(title)
+
+    if idx is None:
+        print("❌ Сериал не найден.")
+        return
+
+    item = data[idx]
+
+    item["watched"] = int(item.get("watched", 0)) + 1
+    item["last_watched_at"] = now()
+
+    # простая логика: после серии +1
+    item["episode"] = int(item.get("episode", 1)) + 1
+
+    save_series(data)
+
+    print(f'✅ Отмечено просмотренным: {item["title"]}')
+    print(f'Следующая: {item["season"]} сезон {item["episode"]} серия')
+
+
+def play_next_series(title=None):
+    data = load_series()
+
+    if not data:
+        print('Сериалов нет. Добавить: vsearch -sadd "Название"')
+        return
+
+    if title:
+        idx = find_series_index(title)
+    else:
+        show_series()
+        raw = input("\nНомер сериала | Enter = первый | 0 = отмена: ").strip()
+
+        if raw == "0":
+            return
+
+        if not raw:
+            idx = 0
+        elif raw.isdigit() and 1 <= int(raw) <= len(data):
+            idx = int(raw) - 1
+        else:
+            print("❌ Неверный номер.")
+            return
+
+    if idx is None:
+        print("❌ Сериал не найден.")
+        return
+
+    item = data[idx]
+    query = episode_query(item)
+
+    print(f'\n📺 {item["title"]}')
+    print(f'▶️ Ищу: {query}')
+
+    # Для сериалов strict=False, потому что серия может быть короче фильма.
+    if play_query(query, strict=False):
+        ans = input("\nОтметить серию просмотренной? [Y/n]: ").strip().lower()
+
+        if ans not in ["n", "no", "н", "нет"]:
+            mark_series_done(item["title"])
+
+
+def delete_series(title):
+    data = load_series()
+    idx = find_series_index(title)
+
+    if idx is None:
+        print("❌ Сериал не найден.")
+        return
+
+    item = data.pop(idx)
+    save_series(data)
+
+    print(f'🗑 Удалено: {item["title"]}')
+
+
+def series_menu():
+    while True:
+        banner()
+
+        if RICH:
+            console.print(Panel(
+                "1. 📺 Показать сериалы\n"
+                "2. ▶️ Включить следующую серию\n"
+                "3. ➕ Добавить сериал\n"
+                "4. ✅ Отметить серию просмотренной\n"
+                "5. 🎯 Поставить сезон/серию вручную\n"
+                "6. 🗑 Удалить сериал\n"
+                "0. Назад",
+                title="📺 Режим сериалов",
+                border_style="cyan"
+            ))
+        else:
+            print("1. Показать сериалы")
+            print("2. Включить следующую серию")
+            print("3. Добавить сериал")
+            print("4. Отметить серию просмотренной")
+            print("5. Поставить сезон/серию")
+            print("6. Удалить сериал")
+            print("0. Назад")
+
+        choice = input("\nВыбор: ").strip()
+
+        if choice == "0":
+            return
+
+        elif choice == "1":
+            show_series()
+            input("\nEnter...")
+
+        elif choice == "2":
+            play_next_series()
+
+        elif choice == "3":
+            title = input("Название сериала: ").strip()
+            season = input("Сезон [1]: ").strip() or "1"
+            episode = input("Серия [1]: ").strip() or "1"
+
+            if title and season.isdigit() and episode.isdigit():
+                add_series(title, int(season), int(episode))
+            else:
+                print("❌ Неверные данные.")
+
+            input("\nEnter...")
+
+        elif choice == "4":
+            title = input("Название сериала: ").strip()
+            if title:
+                mark_series_done(title)
+            input("\nEnter...")
+
+        elif choice == "5":
+            title = input("Название сериала: ").strip()
+            season = input("Сезон: ").strip()
+            episode = input("Серия: ").strip()
+
+            if title and season.isdigit() and episode.isdigit():
+                set_series_progress(title, int(season), int(episode))
+            else:
+                print("❌ Неверные данные.")
+
+            input("\nEnter...")
+
+        elif choice == "6":
+            title = input("Название сериала: ").strip()
+            if title:
+                delete_series(title)
+            input("\nEnter...")
+
+        else:
+            print("❌ Нет такого пункта.")
+
+
 def help_text():
     print("""
 vsearch — кино-комбайн
@@ -1440,6 +1711,16 @@ vsearch — кино-комбайн
   vsearch -stats
   vsearch -all
   vsearch -clear
+
+Сериалы:
+  vsearch -series
+  vsearch -slist
+  vsearch -sadd "Во все тяжкие"
+  vsearch -sadd "Во все тяжкие" 2 5
+  vsearch -snext "Во все тяжкие"
+  vsearch -sdone "Во все тяжкие"
+  vsearch -sset "Во все тяжкие" 2 5
+  vsearch -sdel "Во все тяжкие"
 
 Марафоны:
   vsearch -marathons
@@ -1569,6 +1850,54 @@ def main():
 
     elif cmd == "-video":
         show_video_modes()
+
+    elif cmd == "-series":
+        series_menu()
+
+    elif cmd == "-slist":
+        show_series()
+
+    elif cmd == "-sadd":
+        if len(args) < 2:
+            print('❌ Пример: vsearch -sadd "Во все тяжкие"')
+        else:
+            # можно: vsearch -sadd "Сериал" 2 5
+            if len(args) >= 4 and args[-1].isdigit() and args[-2].isdigit():
+                title = " ".join(args[1:-2])
+                season = int(args[-2])
+                episode = int(args[-1])
+            else:
+                title = " ".join(args[1:])
+                season = 1
+                episode = 1
+            add_series(title, season, episode)
+
+    elif cmd == "-snext":
+        if len(args) < 2:
+            play_next_series()
+        else:
+            play_next_series(" ".join(args[1:]))
+
+    elif cmd == "-sdone":
+        if len(args) < 2:
+            print('❌ Пример: vsearch -sdone "Во все тяжкие"')
+        else:
+            mark_series_done(" ".join(args[1:]))
+
+    elif cmd == "-sset":
+        if len(args) < 4 or not args[-1].isdigit() or not args[-2].isdigit():
+            print('❌ Пример: vsearch -sset "Во все тяжкие" 2 5')
+        else:
+            title = " ".join(args[1:-2])
+            season = int(args[-2])
+            episode = int(args[-1])
+            set_series_progress(title, season, episode)
+
+    elif cmd == "-sdel":
+        if len(args) < 2:
+            print('❌ Пример: vsearch -sdel "Во все тяжкие"')
+        else:
+            delete_series(" ".join(args[1:]))
 
     elif cmd in ["-h", "--help", "-help"]:
         help_text()
