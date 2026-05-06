@@ -36,6 +36,7 @@ ORDERS_FILE = CFG / "orders.txt"
 BAD_WORDS_FILE = CFG / "bad_words.txt"
 QUOTES_FILE = CFG / "quotes.json"
 SETTINGS_FILE = CFG / "settings.json"
+MOVIE_HINTS_FILE = CFG / "movie_hints.txt"
 
 RUTUBE_SEARCH = "https://rutube.ru/api/search/video/"
 
@@ -96,6 +97,60 @@ def load_bad_words():
 
 def load_quotes():
     return load_json(QUOTES_FILE, {"_generic": ["🎬 Ищу фильм."]})
+
+
+def load_movie_hints():
+    result = {}
+
+    if not MOVIE_HINTS_FILE.exists():
+        return result
+
+    for line in MOVIE_HINTS_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+
+        if not line or line.startswith("#") or "=>" not in line:
+            continue
+
+        title, hints = line.split("=>", 1)
+        result[key(title)] = [x.strip() for x in hints.split("/") if x.strip()]
+
+    return result
+
+
+def hints_for(query):
+    q = key(query)
+    hints = load_movie_hints()
+
+    for title_key, values in hints.items():
+        if q == title_key or title_key in q or q in title_key:
+            return values
+
+    return []
+
+
+def is_series_query(query):
+    q = key(query)
+    markers = [
+        "сезон", "series", "сериал", "doctor who", "доктор кто",
+        "симпсоны", "футурама", "рик и морти", "южный парк",
+        "гравити фолз", "время приключений"
+    ]
+    return any(x in q for x in markers)
+
+
+def search_query_for(query, strict=True):
+    q = norm(query)
+    hints = hints_for(q)
+
+    year = next((h for h in hints if h.isdigit() and len(h) == 4), None)
+
+    if strict and not is_series_query(q):
+        if year and year not in q:
+            return f"{q} фильм {year}"
+        if "фильм" not in key(q):
+            return f"{q} фильм"
+
+    return q
 
 
 def norm(text):
@@ -223,95 +278,117 @@ def parse_duration(value):
     return 0
 
 
-def is_bad_result(title):
+def is_bad_result(title, query="", strict=True):
     low = title.lower()
+    q = key(query)
 
-    extra_bad = [
-        "заставка",
-        "интро",
-        "intro",
-        "opening",
-        "опенинг",
-        "ending",
-        "эндинг",
-        "нарезка",
-        "фрагмент",
-        "отрывок",
-        "момент",
-        "сцена",
-        "лучшие сцены",
-        "лучшие моменты",
-        "трейлер",
-        "тизер",
-        "обзор",
-        "реакция",
-        "пересказ",
-        "кратко",
-        "объяснение",
-        "эдит",
-        "edit",
-        "shorts",
-        "short",
-        "саундтрек",
-        "ost",
-        "клип",
-        "интервью",
-        "behind the scenes"
+    base_bad = load_bad_words()
+
+    strict_bad = [
+        "заставка", "интро", "intro", "опенинг", "opening", "эндинг", "ending",
+        "прохождение", "полное прохождение", "gameplay", "летсплей", "letsplay",
+        "let's play", "стрим", "stream", "игрофильм", "аудиокнига", "аудиокниги",
+        "озвучка", "мод", "модификация", "anomaly", "gamma",
+        "shadow of chernobyl", "зов припяти", "чистое небо",
+        "сердце чернобыля", "heart of chornobyl", "stalker 2", "s.t.a.l.k.e.r",
+        "100 дней", "эдит", "edit", "shorts", "short", "нарезка", "фрагмент",
+        "отрывок", "сцена", "лучшие сцены", "лучшие моменты", "обзор", "реакция",
+        "разбор", "пересказ", "кратко", "объяснение", "ost", "саундтрек", "клип"
     ]
 
-    return any(word in low for word in load_bad_words() + extra_bad)
+    words = base_bad + strict_bad if strict else base_bad
+
+    # Для игровых названий особенно режем игровые результаты.
+    if "сталкер" in q:
+        stalker_game_bad = [
+            "прохождение", "stalker 2", "s.t.a.l.k.e.r", "сердце чернобыля",
+            "heart of chornobyl", "shadow of chernobyl", "зов припяти",
+            "чистое небо", "anomaly", "gamma", "мод", "игрофильм"
+        ]
+        words += stalker_game_bad
+
+    return any(word in low for word in words)
 
 
 def result_score(movie_query, video_title, duration):
     q = key(movie_query)
     t = key(video_title)
+    hints = hints_for(movie_query)
     score = 0
 
-    # Чем точнее название, тем выше результат
+    # точность названия
     if q == t:
-        score += 80
+        score += 100
     elif q in t:
-        score += 50
+        score += 65
 
     q_words = [w for w in q.split() if len(w) > 2]
     matched = 0
+
     for w in q_words:
         if w in t:
             matched += 1
-            score += 5
+            score += 6
 
     if q_words and matched == len(q_words):
-        score += 20
+        score += 25
 
-    # Признаки нормальной полной версии
+    # подсказки: год, режиссёр, альтернативное название
+    for hint in hints:
+        h = key(hint)
+        if h and h in t:
+            if hint.isdigit() and len(hint) == 4:
+                score += 90
+            else:
+                score += 35
+
+    # признаки настоящего фильма
     good_words = [
-        "фильм", "полный фильм", "смотреть онлайн", "hd",
-        "1080", "720", "full", "movie", "без рекламы"
+        "фильм", "полный фильм", "смотреть онлайн", "реж.", "режиссер",
+        "режиссёр", "андрей тарковский", "4к", "4k", "hd", "1080", "720"
     ]
-    for w in good_words:
-        if w in t:
-            score += 4
 
-    # Чем ближе к длине нормального фильма, тем лучше
+    for w in good_words:
+        if key(w) in t:
+            score += 8
+
+    # длительность
     if duration >= 60 * 60:
-        score += 35
+        score += 45
     elif 40 * 60 <= duration < 60 * 60:
         score += 10
     elif 0 < duration < 40 * 60:
-        score -= 50
+        score -= 80
     elif duration == 0:
         score -= 5
 
-    # Сильный штраф за мусорные форматы
+    # мусор
     bad_hints = [
         "заставка", "интро", "опенинг", "ending", "эндинг",
         "трейлер", "тизер", "обзор", "реакция", "разбор",
         "пересказ", "нарезка", "сцена", "фрагмент", "отрывок",
-        "эдит", "edit", "shorts", "клип", "ost", "саундтрек"
+        "эдит", "edit", "shorts", "клип", "ost", "саундтрек",
+        "прохождение", "gameplay", "летсплей", "стрим", "игрофильм",
+        "аудиокнига", "озвучка", "мод", "anomaly", "gamma"
     ]
+
     for w in bad_hints:
         if w in t:
-            score -= 100
+            score -= 160
+
+    # отдельный жёсткий случай: фильм «Сталкер» vs игры S.T.A.L.K.E.R.
+    if "сталкер" in q:
+        game_words = [
+            "stalker 2", "s.t.a.l.k.e.r", "сердце чернобыля",
+            "heart of chornobyl", "shadow of chernobyl", "зов припяти",
+            "чистое небо", "anomaly", "gamma", "прохождение", "игрофильм"
+        ]
+
+        if any(w in t for w in game_words):
+            score -= 250
+
+        if "1979" in t or "тарковский" in t:
+            score += 150
 
     return score
 
@@ -321,11 +398,12 @@ def search_rutube(query, strict=True):
     min_duration = int(settings.get("min_duration_minutes", 60)) * 60
     limit = int(settings.get("results_limit", 20))
     allow_unknown = bool(settings.get("allow_unknown_duration", True))
+    final_query = search_query_for(query, strict=strict)
 
     try:
         r = requests.get(
             RUTUBE_SEARCH,
-            params={"query": query, "page": 1, "limit": limit},
+            params={"query": final_query, "page": 1, "limit": limit},
             timeout=12,
             headers={"User-Agent": "Mozilla/5.0 vsearch"}
         )
@@ -340,7 +418,7 @@ def search_rutube(query, strict=True):
     for item in data.get("results", []):
         title = item.get("title") or "Без названия"
 
-        if is_bad_result(title):
+        if is_bad_result(title, query=query, strict=strict):
             continue
 
         url = item.get("video_url") or item.get("html_url") or item.get("url")
@@ -370,6 +448,18 @@ def search_rutube(query, strict=True):
 
 
 def choose_video(videos):
+    settings = load_settings()
+
+    if settings.get("auto_select_best", True) and videos:
+        threshold = int(settings.get("auto_select_threshold", 85))
+        gap = int(settings.get("auto_select_gap", 12))
+        first = videos[0].get("score", 0)
+        second = videos[1].get("score", -999) if len(videos) > 1 else -999
+
+        if first >= threshold and first - second >= gap:
+            print(f"✅ Автовыбор: {videos[0]['title']} [{videos[0]['duration']}] score={first}")
+            return 0
+
     if RICH:
         table = Table(title="🔎 Найдено", border_style="cyan")
         table.add_column("№", justify="right", style="bold cyan")
@@ -929,7 +1019,7 @@ def play_marathon_direct(query):
     print(f"\n🏁 {title}")
     print(f"▶️ Часть 1/{len(order)}: {episode}")
 
-    play_query(episode, strict=False)
+    play_query(episode, strict=not is_series_query(episode))
 
 
 def play_next_marathon():
@@ -956,7 +1046,7 @@ def play_next_marathon():
     print(f"\n🏁 {title}")
     print(f"▶️ Часть {idx + 1}/{len(order)}: {episode}")
 
-    if play_query(episode, strict=False):
+    if play_query(episode, strict=not is_series_query(episode)):
         answer = input("\nОтметить эту часть просмотренной? [y/N]: ").strip().lower()
 
         if answer in ["y", "yes", "д", "да"]:
