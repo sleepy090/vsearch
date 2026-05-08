@@ -1,36 +1,35 @@
-name: Build Windows EXE
+name: windows build
 
 on:
-push:
-branches: [ main, master ]
-workflow_dispatch:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
-build:
-runs-on: windows-latest
+  build:
+    runs-on: windows-latest
 
-```
-steps:
-  - name: Checkout
-    uses: actions/checkout@v4
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
 
-  - name: Setup Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: "3.12"
+      - name: setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-  - name: Install deps
-    run: |
-      python -m pip install --upgrade pip
-      pip install pyinstaller yt-dlp
+      - name: install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller yt-dlp
 
-  - name: Build EXE
-    run: |
-      pyinstaller --onefile --name vsearch vsearch.py
+      - name: build exe
+        run: |
+          pyinstaller --onefile --name vsearch vsearch.py
 
-  - name: Upload artifact
-    uses: actions/upload-artifact@v4
-    with:
-      name: vsearch-windows
-      path: dist/vsearch.exe
-```
+      - name: upload exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsearch-windows
+          path: dist/vsearch.exe
