@@ -165,7 +165,12 @@ def select(
             items, line=line, subline=subline, title=title, keys=keys, enter_help=enter_help
         )
 
-    with Live(console=console, refresh_per_second=20, screen=False, transient=False) as live:
+    with Live(
+        console=console,
+        screen=False,
+        transient=True,
+        auto_refresh=False,
+    ) as live:
         live.update(Group(render(), help_bar()))
         while True:
             key = read_key()
