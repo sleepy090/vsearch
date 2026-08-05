@@ -101,3 +101,92 @@ def show_detail(console, m):
     desc = m.get("description", "")
     if desc:
         console.print(Panel(escape(desc[:1000]), title="Описание", border_style="dim"))
+
+def show_watchlist_table(console, items, title="Список фильмов"):
+    table = Table(title=title, header_style="bold cyan", box=None, pad_edge=False)
+    table.add_column("#", justify="right")
+    table.add_column("Фильм")
+    table.add_column("Оценка", justify="right")
+    table.add_column("Добавлен")
+    for i, m in enumerate(items, 1):
+        rating = f"{m.get('rating')}/10" if m.get("rating") else "—"
+        table.add_row(str(i), escape(_truncate(m.get("title", ""), 60)), rating, m.get("added_at", ""))
+    console.print(table)
+
+
+def show_history_table(console, items):
+    table = Table(title=f"История · {len(items)} просмотрено", header_style="bold green", box=None, pad_edge=False)
+    table.add_column("#", justify="right")
+    table.add_column("Фильм")
+    table.add_column("Оценка", justify="right")
+    table.add_column("Когда", justify="right")
+    for i, m in enumerate(items, 1):
+        rating = f"{m.get('rating')}/10" if m.get("rating") else "без оценки"
+        table.add_row(str(i), escape(_truncate(m.get("title", ""), 60)), rating, m.get("watched_at", "—"))
+    console.print(table)
+
+
+def show_stats_table(console, s):
+    table = Table(title="Статистика", header_style="bold cyan", box=None, pad_edge=False)
+    table.add_column("Параметр", style="bold")
+    table.add_column("Значение")
+    table.add_row("Всего фильмов", str(s["total"]))
+    table.add_row("Просмотрено", str(s["done"]))
+    table.add_row("Осталось", str(s["left"]))
+    table.add_row("Прогресс", f"{s['percent']}%")
+    table.add_row("Оценок", str(s["rated"]))
+    table.add_row("Средняя оценка", str(s["avg"]) if s["avg"] is not None else "—")
+    console.print(table)
+
+
+def show_series_table(console, items):
+    table = Table(title="Сериалы", header_style="bold cyan", box=None, pad_edge=False)
+    table.add_column("#", justify="right")
+    table.add_column("Название")
+    table.add_column("Следующая серия")
+    table.add_column("Серий", justify="right")
+    for i, m in enumerate(items, 1):
+        table.add_row(
+            str(i),
+            escape(_truncate(m.get("title", ""), 50)),
+            f'{m.get("season", 1)} сезон {m.get("episode", 1)} серия',
+            str(m.get("watched", 0)),
+        )
+    console.print(table)
+
+
+def show_queue_table(console, items):
+    table = Table(title="Очередь марафонов", header_style="bold cyan", box=None, pad_edge=False)
+    table.add_column("#", justify="right")
+    table.add_column("Марафон")
+    table.add_column("Часть", justify="right")
+    table.add_column("Текущая")
+    for i, m in enumerate(items, 1):
+        idx = int(m.get("current_index", 0))
+        parts = m.get("parts", [])
+        total = len(parts)
+        current = parts[idx] if idx < total else "завершён"
+        table.add_row(
+            str(i),
+            escape(_truncate(m.get("title", ""), 40)),
+            f"{idx + 1}/{total}",
+            escape(_truncate(current, 40)),
+        )
+    console.print(table)
+
+
+def show_info_card(console, query, meta):
+    if not isinstance(meta, dict) or not meta:
+        return
+    lines = [f"[bold]{escape(query)}[/bold]"]
+    for key, label in (
+        ("ru", "RU"),
+        ("year", "Год"),
+        ("type", "Тип"),
+        ("genre", "Жанр"),
+        ("note", "Заметка"),
+    ):
+        val = meta.get(key)
+        if val:
+            lines.append(f"[cyan]{label}:[/cyan] {escape(str(val))}")
+    console.print(Panel("\n".join(lines), title="Карточка", border_style="cyan"))

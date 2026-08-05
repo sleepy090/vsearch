@@ -354,3 +354,98 @@ def unmatched_parts(franchise: dict, cache_ttl: int = 24 * 3600) -> list[str]:
         else:
             missing.append(part)
     return missing
+
+def queue_load() -> list[dict]:
+    from . import config
+    data = config.load_json(config.MQUEUE_FILE, [])
+    return data if isinstance(data, list) else []
+
+
+def queue_save(q: list[dict]) -> None:
+    from . import config
+    config.save_json(config.MQUEUE_FILE, q)
+
+
+def queue_add(name: str, category: str = "Другое") -> bool:
+    q = queue_load()
+    if any(x["title"].lower() == name.lower() and not x.get("done") for x in q):
+        return False
+    q.append({
+        "title": name,
+        "category": category,
+        "current_index": 0,
+        "done": False,
+        "added_at": _ts(),
+        "done_at": None,
+        "rating": None,
+    })
+    queue_save(q)
+    return True
+
+
+def queue_next_part() -> dict | None:
+    """Вернуть следующий активный марафон и его текущую часть."""
+    q = queue_load()
+    active = [x for x in q if not x.get("done")]
+    if not active:
+        return None
+    item = active[0]
+    fr = next((f for f in load_franchises() if f["name"].lower() == item["title"].lower()), None)
+    if fr is None:
+        return None
+    parts = fr.get("parts", [])
+    idx = int(item.get("current_index", 0))
+    if idx >= len(parts):
+        return None
+    return {"item": item, "franchise": fr, "part": parts[idx], "index": idx}
+
+
+def queue_advance() -> tuple[dict | None, bool]:
+    """Пометить текущую часть просмотренной; True если марафон завершён."""
+    cur = queue_next_part()
+    if cur is None:
+        return None, False
+    item = cur["item"]
+    q = queue_load()
+    entry = next((x for x in q if x["title"] == item["title"] and not x.get("done")), None)
+    if entry is None:
+        return None, False
+    parts = cur["franchise"].get("parts", [])
+    idx = int(entry.get("current_index", 0)) + 1
+    if idx >= len(parts):
+        entry["done"] = True
+        entry["done_at"] = _ts()
+        queue_save(q)
+        return entry, True
+    entry["current_index"] = idx
+    queue_save(q)
+    return entry, False
+
+
+def queue_active() -> list[dict]:
+    return [x for x in queue_load() if not x.get("done")]
+
+
+def queue_finish(num: int) -> bool:
+    active = queue_active()
+    if not 1 <= num <= len(active):
+        return False
+    entry = active[num - 1]
+    q = queue_load()
+    e = next((x for x in q if x["title"] == entry["title"] and not x.get("done")), None)
+    if e is None:
+        return False
+    e["done"] = True
+    e["done_at"] = _ts()
+    queue_save(q)
+    return True
+
+
+def _ts() -> str:
+    from datetime import datetime
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def is_series_query(query: str) -> bool:
+    from .scoring import is_series_query as _isq
+    return _isq(query)
