@@ -17,30 +17,28 @@ from .cache import Cache
 from .display import (
     banner,
     format_duration,
+    format_views,
     show_detail,
-    show_history_table,
     show_info_card,
-    show_queue_table,
-    show_series_table,
     show_stats_table,
-    show_table,
-    show_watchlist_table,
 )
+from .movies import parse_description, title_year
 from .player import open_browser, play, player_hint
-from .scoring import movie_quote
+from .selector import confirm, prompt_rating, select
 
 SEARCH_TTL = 6 * 3600
 
 console = Console()
 
-MENU = """\
-[bold]1[/] Поиск фильма
-[bold]2[/] Новинки
-[bold]3[/] Марафоны
-[bold]4[/] Список фильмов
-[bold]5[/] Сериалы
-[bold]6[/] Очередь марафонов
-[bold]0[/] Выход"""
+MENU_ITEMS = [
+    ("search", "Поиск фильма"),
+    ("new", "Новинки"),
+    ("marathon", "Марафоны"),
+    ("watchlist", "Список фильмов"),
+    ("series", "Сериалы"),
+    ("queue", "Очередь марафонов"),
+    ("exit", "Выход"),
+]
 
 
 def _prompt(text: str = "") -> str:
@@ -72,44 +70,72 @@ def _collect(query, sort, pages, ttl=SEARCH_TTL):
     return list(seen.values())
 
 
+def _movie_subline(m):
+    parsed = parse_description(m.get("description", ""))
+    year = parsed["year"] or title_year(m.get("title"))
+    parts = []
+    if year:
+        parts.append(str(year))
+    parts.append(format_duration(m.get("duration")))
+    views = format_views(m.get("hits"))
+    if views != "0":
+        parts.append(f"{views} просмотров")
+    author = m.get("author")
+    if isinstance(author, dict):
+        author = author.get("name")
+    if author:
+        parts.append(str(author))
+    return " · ".join(parts)
+
+
 def _selection_loop(movies):
-    """Интерактивный выбор фильма из списка."""
+    """Интерактивный выбор фильма из списка. Стрелки + Enter, горячие клавиши."""
     while True:
-        show_table(console, movies)
-        console.print(
-            f"[dim]N — детали · wN — смотреть ([cyan]{player_hint()}[/cyan]) · "
-            f"oN — браузер · aN — добавить в список · q — назад[/dim]"
+        item, action = select(
+            movies,
+            title=f"Найдено: {len(movies)}",
+            line=lambda m: m.get("title", ""),
+            subline=_movie_subline,
+            enter_help="смотреть",
+            keys={"i": "детали", "o": "браузер", "a": "в список"},
         )
-        raw = _prompt("> ")
-        if raw.lower() in ("q", "0"):
+        if item is None:
             return
-        action, num = "info", raw
-        if raw[:1].lower() == "w":
-            action, num = "watch", raw[1:]
-        elif raw[:1].lower() == "o":
-            action, num = "open", raw[1:]
-        elif raw[:1].lower() == "a":
-            action, num = "add", raw[1:]
-        try:
-            movie = movies[int(num) - 1]
-        except (ValueError, IndexError):
-            console.print("[red]нет такого номера[/red]")
-            continue
         if action == "watch":
-            _do_watch([movie["video_url"]], title=movie.get("title"))
+            _do_watch([item["video_url"]], title=item.get("title"))
         elif action == "open":
-            open_browser(movie["video_url"])
+            open_browser(item["video_url"])
         elif action == "add":
-            _add_to_watchlist(movie)
-        else:
-            show_detail(console, movie)
-            again = _prompt("w — смотреть, o — браузер, a — в список, b — назад > ").lower()
-            if again == "w":
-                _do_watch([movie["video_url"]], title=movie.get("title"))
-            elif again == "o":
-                open_browser(movie["video_url"])
-            elif again == "a":
-                _add_to_watchlist(movie)
+            _add_to_watchlist(item)
+        elif action == "i":
+            show_detail(console, item)
+            _detail_actions(item)
+
+
+def _detail_actions(movie):
+    """Подменю действий после просмотра деталей."""
+    actions = [
+        ("watch", "Смотреть в mpv"),
+        ("open", "Открыть в браузере"),
+        ("add", "Добавить в список"),
+        ("back", "Назад"),
+    ]
+    item, action = select(
+        actions,
+        title="Действия",
+        line=lambda a: a[1],
+        enter_help="выполнить",
+        keys={"w": "смотреть", "o": "браузер", "a": "в список"},
+    )
+    if item is None or action == "back" or item[0] == "back":
+        return
+    name = item[0]
+    if name == "watch":
+        _do_watch([movie["video_url"]], title=movie.get("title"))
+    elif name == "open":
+        open_browser(movie["video_url"])
+    elif name == "add":
+        _add_to_watchlist(movie)
 
 
 def _add_to_watchlist(movie):
@@ -202,15 +228,16 @@ def cmd_watch(target):
 def _pick_franchise(name):
     franchises = marathons.load_franchises()
     if not name:
-        _list_franchises(franchises)
-        raw = _prompt("> ")
-        if raw.lower() == "q":
-            return None
-        try:
-            return franchises[int(raw) - 1]
-        except (ValueError, IndexError):
-            console.print("[red]нет такого номера[/red]")
-            return None
+        item, _ = select(
+            franchises,
+            title="Марафоны",
+            line=lambda fr: fr["name"],
+            subline=lambda fr: f"{len(fr.get('parts', []))} частей"
+            if fr.get("parts")
+            else "по порядку выпуска",
+            enter_help="открыть",
+        )
+        return item
     fr = next((f for f in franchises if f["name"].lower() == name.lower()), None)
     if fr is None:
         console.print(f"[red]нет франшизы «{name}»[/red]")
@@ -258,23 +285,46 @@ def cmd_marathon_queue():
             None,
         )
         enriched.append({**item, "parts": fr.get("parts", []) if fr else []})
-    show_queue_table(console, enriched)
-    console.print("[dim]N — играть часть · n — следующая · dN — завершить · q — назад[/dim]")
+
+    def sub(item):
+        idx = int(item.get("current_index", 0))
+        parts = item.get("parts", [])
+        if idx < len(parts):
+            return f"часть {idx + 1}/{len(parts)} · {parts[idx]}"
+        return "завершён"
+
     while True:
-        raw = _prompt("> ")
-        if raw.lower() in ("q", "0"):
+        item, action = select(
+            enriched,
+            title="Очередь марафонов",
+            line=lambda m: m["title"],
+            subline=sub,
+            enter_help="играть часть",
+            keys={"n": "следующая", "d": "завершить"},
+        )
+        if item is None:
             return
-        if raw.lower() == "n":
+        if action == "next":
             cmd_marathon_next()
             return
-        if raw[:1].lower() == "d":
-            num = raw[1:]
-            if num.isdigit() and marathons.queue_finish(int(num)):
+        if action == "done":
+            num = enriched.index(item) + 1
+            if marathons.queue_finish(num):
                 console.print("[green]марафон завершён[/green]")
+            q = marathons.queue_active()
+            enriched = [
+                {**x, "parts": next(
+                    (f.get("parts", []) for f in marathons.load_franchises()
+                     if f["name"].lower() == x["title"].lower()),
+                    [],
+                )}
+                for x in q
+            ]
+            if not enriched:
+                return
             continue
-        if raw.isdigit():
-            _play_queue_item(int(raw))
-            return
+        _play_queue_item(enriched.index(item) + 1)
+        return
 
 
 def _play_queue_item(num):
@@ -301,17 +351,17 @@ def _play_queue_item(num):
 
 
 def _ask_advance_queue(title):
-    ans = _prompt("Отметить часть просмотренной? [y/N]: ").lower()
-    if ans in ("y", "yes", "д", "да"):
-        entry, done = marathons.queue_advance()
-        if done:
-            console.print(f"[green]марафон завершён: {entry['title']}[/green]")
-            rating = _prompt("Оценка 1-10, Enter пропустить: ")
-            if rating.isdigit() and 1 <= int(rating) <= 10:
-                entry["rating"] = int(rating)
-                marathons.queue_save(marathons.queue_load())
-        else:
-            console.print("[green]следующая часть в очереди[/green]")
+    if not confirm("Отметить часть просмотренной?"):
+        return
+    entry, done = marathons.queue_advance()
+    if done:
+        console.print(f"[green]марафон завершён: {entry['title']}[/green]")
+        rating = prompt_rating("Оценка 1-10, Enter пропустить: ")
+        if rating:
+            entry["rating"] = rating
+            marathons.queue_save(marathons.queue_load())
+    else:
+        console.print("[green]следующая часть в очереди[/green]")
 
 
 def cmd_marathon_next():
@@ -341,25 +391,31 @@ def cmd_watchlist_list():
     if not items:
         console.print("[yellow]список пуст. vsearch list add «Фильм»[/yellow]")
         return
-    show_watchlist_table(console, items)
-    console.print("[dim]N — смотреть · dN — просмотрено · q — назад[/dim]")
     while True:
-        raw = _prompt("> ")
-        if raw.lower() in ("q", "0"):
+        item, action = select(
+            items,
+            title="Список фильмов",
+            line=lambda m: m["title"],
+            subline=lambda m: f"добавлен {m.get('added_at', '')} · оценка {m.get('rating') or '—'}",
+            enter_help="смотреть",
+            keys={"d": "просмотрено"},
+        )
+        if item is None:
             return
-        if raw[:1].lower() == "d":
-            num = raw[1:]
-            if num.isdigit():
-                title = watchlist.mark_done(int(num))
-                if title:
-                    console.print(f"[green]просмотрено: {title}[/green]")
-                    rating = _prompt("Оценка 1-10, Enter пропустить: ")
-                    if rating.isdigit() and 1 <= int(rating) <= 10:
-                        watchlist.save(watchlist.load())
+        num = items.index(item) + 1
+        if action == "done":
+            title = watchlist.mark_done(num)
+            if title:
+                console.print(f"[green]просмотрено: {title}[/green]")
+                rating = prompt_rating("Оценка 1-10, Enter пропустить: ")
+                if rating:
+                    watchlist.save(watchlist.load())
+            items = watchlist.unwatched()
+            if not items:
+                return
             continue
-        if raw.isdigit():
-            _play_watchlist_item(int(raw))
-            return
+        _play_watchlist_item(num)
+        return
 
 
 def _play_watchlist_item(num):
@@ -370,8 +426,7 @@ def _play_watchlist_item(num):
     title = items[num - 1]["title"]
     console.print(f"[bold]{title}[/bold]")
     _search_and_select(title)
-    ans = _prompt("Отметить просмотренным? [y/N]: ").lower()
-    if ans in ("y", "yes", "д", "да"):
+    if confirm("Отметить просмотренным?"):
         title2 = watchlist.mark_done(num)
         if title2:
             console.print(f"[green]просмотрено: {title2}[/green]")
@@ -417,18 +472,21 @@ def cmd_watchlist_history():
     if not items:
         console.print("[yellow]пока пусто[/yellow]")
         return
-    show_history_table(console, items)
-    console.print("[dim]N — изменить оценку · q — назад[/dim]")
     while True:
-        raw = _prompt("> ")
-        if raw.lower() in ("q", "0"):
+        item, action = select(
+            items,
+            title=f"История · {len(items)} просмотрено",
+            line=lambda m: m["title"],
+            subline=lambda m: f"оценка {m.get('rating') or '—'} · {m.get('watched_at', '—')}",
+            enter_help="изменить оценку",
+        )
+        if item is None:
             return
-        if raw.isdigit():
-            num = int(raw)
-            rating = _prompt(f"Оценка для {items[num - 1]['title']} (1-10): ")
-            if rating.isdigit():
-                cmd_watchlist_rate(num, rating)
-            return
+        num = items.index(item) + 1
+        rating = prompt_rating(f"Оценка для {item['title']} (1-10): ")
+        if rating:
+            cmd_watchlist_rate(num, rating)
+        return
 
 
 def cmd_watchlist_stats():
@@ -440,15 +498,18 @@ def cmd_series_list():
     if not items:
         console.print('[yellow]сериалов нет. vsearch series add «Название»[/yellow]')
         return
-    show_series_table(console, items)
-    console.print("[dim]N — следующая серия · q — назад[/dim]")
     while True:
-        raw = _prompt("> ")
-        if raw.lower() in ("q", "0"):
+        item, action = select(
+            items,
+            title="Сериалы",
+            line=lambda m: m["title"],
+            subline=lambda m: f"{m.get('season', 1)} сезон {m.get('episode', 1)} серия · просмотрено {m.get('watched', 0)}",
+            enter_help="следующая серия",
+        )
+        if item is None:
             return
-        if raw.isdigit():
-            _play_series_num(int(raw))
-            return
+        _play_series_num(items.index(item) + 1)
+        return
 
 
 def _play_series_num(num):
@@ -459,8 +520,7 @@ def _play_series_num(num):
     title, query = res
     console.print(f"[bold]{title}[/bold] — ищу: {query}")
     _search_and_select(query, strict=False)
-    ans = _prompt("Отметить серию просмотренной? [Y/n]: ").lower()
-    if ans not in ("n", "no", "н", "нет"):
+    if confirm("Отметить серию просмотренной?", default=True):
         series.mark_done(title)
         console.print("[green]прогресс обновлён[/green]")
 
@@ -567,27 +627,33 @@ def menu():
     banner(console)
     console.print("[dim]vsearch — фильмы с Rutube в терминале[/dim]\n")
     while True:
-        console.print(MENU)
-        raw = _prompt("vsearch> ")
-        if raw == "1":
+        item, action = select(
+            MENU_ITEMS,
+            title="Главное меню",
+            line=lambda m: m[1],
+            enter_help="выбрать",
+        )
+        if item is None:
+            console.print("[dim]пока![/dim]")
+            break
+        cmd = item[0]
+        if cmd == "exit":
+            console.print("[dim]пока![/dim]")
+            break
+        if cmd == "search":
             query = _prompt("Что ищем? ")
             if query:
                 cmd_search(query)
-        elif raw == "2":
+        elif cmd == "new":
             cmd_new()
-        elif raw == "3":
+        elif cmd == "marathon":
             cmd_marathon()
-        elif raw == "4":
+        elif cmd == "watchlist":
             cmd_watchlist_list()
-        elif raw == "5":
+        elif cmd == "series":
             cmd_series_list()
-        elif raw == "6":
+        elif cmd == "queue":
             cmd_marathon_queue()
-        elif raw.lower() in ("0", "q"):
-            console.print("[dim]пока![/dim]")
-            break
-        else:
-            console.print("[red]?[/red]")
 
 
 def main(argv=None):

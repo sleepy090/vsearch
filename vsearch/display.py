@@ -6,25 +6,46 @@ from rich.table import Table
 
 from .movies import parse_description, title_year
 
+MAUVE = "#B48EAD"
+LAVENDER = "#C5C2EA"
+PINK = "#EFB8C9"
+CYAN = "#88C0D0"
+GREEN = "#A3BE8C"
+DIM = "#616E88"
+
+_TABLE_STYLE = {
+    "header": f"bold {CYAN}",
+    "title": f"bold {LAVENDER}",
+    "box": None,
+    "pad_edge": False,
+}
+
 FALLBACK_ART = r"""
-██╗   ██╗███████╗██╗     ██╗██╗  ██╗
-██║   ██║██╔════╝██║     ██║╚██╗██╔╝
-██║   ██║█████╗  ██║     ██║ ╚███╔╝
-╚██╗ ██╔╝██╔══╝  ██║     ██║ ██╔██╗
- ╚████╔╝ ██║     ███████╗██║██╔╝ ██╗
-  ╚═══╝  ╚═╝     ╚══════╝╚═╝╚═╝  ╚═╝
+███████╗███████╗███████╗ █████╗ ██████╗  ██████╗██╗  ██╗
+██╔════╝██╔════╝██╔════╝██╔══██╗██╔══██╗██╔════╝██║  ██║
+███████╗█████╗  ███████╗███████║██████╔╝██║     ███████║
+╚════██║██╔══╝  ╚════██║██╔══██║██╔══██╗██║     ██╔══██║
+███████║███████╗███████║██║  ██║██║  ██║╚██████╗██║  ██║
+╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝
 """
 
 
 def banner(console):
+    from rich.text import Text
+
     try:
         from pyfiglet import Figlet
 
         fig = Figlet(font="standard")
-        art = fig.renderText("VFLIX")
+        art = fig.renderText("VSEARCH")
     except Exception:
         art = FALLBACK_ART
-    console.print(art.rstrip("\n"), style="bold cyan", highlight=False)
+    lines = [line for line in art.rstrip("\n").splitlines() if line.strip()]
+    for line in lines:
+        console.print(
+            Text.from_markup(f"[gradient({MAUVE},{LAVENDER},{PINK})]{escape(line)}[/]"),
+            highlight=False,
+        )
 
 
 def _truncate(value, limit):
@@ -56,8 +77,20 @@ def format_views(n):
     return str(n)
 
 
+def _table(title: str, header: str | None = None) -> Table:
+    table = Table(
+        title=title,
+        header_style=header or f"bold {CYAN}",
+        box=None,
+        pad_edge=False,
+        title_style=f"bold {LAVENDER}",
+        border_style=DIM,
+    )
+    return table
+
+
 def show_table(console, movies):
-    table = Table(title=f"{len(movies)} фильмов", header_style="bold cyan", box=None, pad_edge=False)
+    table = _table(f"{len(movies)} фильмов")
     table.add_column("#", justify="right")
     table.add_column("Название")
     table.add_column("Год", justify="right")
@@ -81,29 +114,30 @@ def show_table(console, movies):
 
 def show_detail(console, m):
     parsed = parse_description(m.get("description", ""))
-    console.print(f"\n[bold]{escape(m.get('title', ''))}[/bold]")
+    title = escape(m.get("title", ""))
+    console.print(f"\n[bold {LAVENDER}]{title}[/bold {LAVENDER}]")
     if parsed["year"]:
-        console.print(f"[cyan]Год:[/cyan] {parsed['year']}")
+        console.print(f"[{CYAN}]Год:[/{CYAN}] {parsed['year']}")
     if parsed["country"]:
-        console.print(f"[cyan]Страна:[/cyan] {escape(parsed['country'])}")
+        console.print(f"[{CYAN}]Страна:[/{CYAN}] {escape(parsed['country'])}")
     if parsed["genres"]:
-        console.print(f"[cyan]Жанр:[/cyan] {escape(', '.join(parsed['genres']))}")
+        console.print(f"[{CYAN}]Жанр:[/{CYAN}] {escape(', '.join(parsed['genres']))}")
     if parsed["director"]:
-        console.print(f"[cyan]Режиссёр:[/cyan] {escape(parsed['director'])}")
+        console.print(f"[{CYAN}]Режиссёр:[/{CYAN}] {escape(parsed['director'])}")
     author = (m.get("author") or {}).get("name")
     console.print(
-        f"[cyan]Длительность:[/cyan] {format_duration(m.get('duration'))} · "
-        f"[cyan]Просмотры:[/cyan] {format_views(m.get('hits'))}"
+        f"[{CYAN}]Длительность:[/{CYAN}] {format_duration(m.get('duration'))} · "
+        f"[{CYAN}]Просмотры:[/{CYAN}] {format_views(m.get('hits'))}"
     )
     if author:
-        console.print(f"[cyan]Канал:[/cyan] {escape(author)}")
-    console.print(f"[dim]{escape(m.get('video_url', ''))}[/dim]")
+        console.print(f"[{CYAN}]Канал:[/{CYAN}] {escape(author)}")
+    console.print(f"[{DIM}]{escape(m.get('video_url', ''))}[/{DIM}]")
     desc = m.get("description", "")
     if desc:
-        console.print(Panel(escape(desc[:1000]), title="Описание", border_style="dim"))
+        console.print(Panel(escape(desc[:1000]), title="Описание", border_style=DIM))
 
 def show_watchlist_table(console, items, title="Список фильмов"):
-    table = Table(title=title, header_style="bold cyan", box=None, pad_edge=False)
+    table = _table(title)
     table.add_column("#", justify="right")
     table.add_column("Фильм")
     table.add_column("Оценка", justify="right")
@@ -115,7 +149,7 @@ def show_watchlist_table(console, items, title="Список фильмов"):
 
 
 def show_history_table(console, items):
-    table = Table(title=f"История · {len(items)} просмотрено", header_style="bold green", box=None, pad_edge=False)
+    table = _table(f"История · {len(items)} просмотрено", header=f"bold {GREEN}")
     table.add_column("#", justify="right")
     table.add_column("Фильм")
     table.add_column("Оценка", justify="right")
@@ -127,8 +161,8 @@ def show_history_table(console, items):
 
 
 def show_stats_table(console, s):
-    table = Table(title="Статистика", header_style="bold cyan", box=None, pad_edge=False)
-    table.add_column("Параметр", style="bold")
+    table = _table("Статистика")
+    table.add_column("Параметр", style=f"bold {LAVENDER}")
     table.add_column("Значение")
     table.add_row("Всего фильмов", str(s["total"]))
     table.add_row("Просмотрено", str(s["done"]))
@@ -140,7 +174,7 @@ def show_stats_table(console, s):
 
 
 def show_series_table(console, items):
-    table = Table(title="Сериалы", header_style="bold cyan", box=None, pad_edge=False)
+    table = _table("Сериалы")
     table.add_column("#", justify="right")
     table.add_column("Название")
     table.add_column("Следующая серия")
@@ -156,7 +190,7 @@ def show_series_table(console, items):
 
 
 def show_queue_table(console, items):
-    table = Table(title="Очередь марафонов", header_style="bold cyan", box=None, pad_edge=False)
+    table = _table("Очередь марафонов")
     table.add_column("#", justify="right")
     table.add_column("Марафон")
     table.add_column("Часть", justify="right")
@@ -178,7 +212,7 @@ def show_queue_table(console, items):
 def show_info_card(console, query, meta):
     if not isinstance(meta, dict) or not meta:
         return
-    lines = [f"[bold]{escape(query)}[/bold]"]
+    lines = [f"[bold {LAVENDER}]{escape(query)}[/bold {LAVENDER}]"]
     for key, label in (
         ("ru", "RU"),
         ("year", "Год"),
@@ -188,5 +222,5 @@ def show_info_card(console, query, meta):
     ):
         val = meta.get(key)
         if val:
-            lines.append(f"[cyan]{label}:[/cyan] {escape(str(val))}")
-    console.print(Panel("\n".join(lines), title="Карточка", border_style="cyan"))
+            lines.append(f"[{CYAN}]{label}:[/{CYAN}] {escape(str(val))}")
+    console.print(Panel("\n".join(lines), title="Карточка", border_style=MAUVE))
