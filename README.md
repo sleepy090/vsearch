@@ -4,13 +4,66 @@
 
 ## Установка
 
+### Linux (рекомендуемый способ)
+
+Сначала установи Python и `mpv` — `mpv` нужен для просмотра фильмов в отдельном окне.
+
+Arch Linux / CachyOS:
+
 ```bash
-cd vsearch
-python3 -m venv .venv
-.venv/bin/pip install -e .
+sudo pacman -S --needed git python python-pip mpv
 ```
 
-После этого доступен `vsearch` (через `.venv/bin/vsearch`) или `python -m vsearch`.
+Ubuntu / Debian:
+
+```bash
+sudo apt update
+sudo apt install -y git python3 python3-venv mpv
+```
+
+Затем скачай проект и установи его в виртуальное окружение:
+
+```bash
+git clone https://github.com/sleepy090/vsearch.git
+cd vsearch
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install .
+```
+
+После установки запускай программу из каталога проекта:
+
+```bash
+source .venv/bin/activate
+vsearch
+```
+
+Если не хочешь активировать окружение, используй полный путь:
+
+```bash
+./.venv/bin/vsearch
+```
+
+Проверить установку можно так:
+
+```bash
+vsearch --help
+```
+
+### Обновление
+
+```bash
+cd vsearch
+git pull
+source .venv/bin/activate
+python -m pip install .
+```
+
+### Без `mpv`
+
+Искать фильмы можно и без `mpv`, но для просмотра приложение откроет ссылку в браузере.
+На Linux для этого обычно нужен `xdg-open` (он входит в стандартное графическое окружение).
 
 ## Использование
 
