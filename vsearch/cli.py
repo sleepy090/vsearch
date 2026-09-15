@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 
 from rich.console import Console
 
 from . import config, marathons, series, watchlist
 from .api import (
+    GENRE_TAGS,
+    TAG_FEEDS,
     Rutube,
     RutubeError,
-    search_rutube_scored,
+    search_cached,
     staged_search,
+    tag_feed_cached,
     to_display_items,
 )
 from .cache import Cache
@@ -21,9 +25,11 @@ from .display import (
     show_detail,
     show_info_card,
     show_stats_table,
+    show_tmdb_detail,
 )
-from .movies import parse_description, title_year
+from .movies import is_movie, parse_description, title_year
 from .player import open_browser, play, player_hint
+from .scoring import is_bad_result
 from .selector import confirm, prompt_rating, select
 
 SEARCH_TTL = 6 * 3600
@@ -101,7 +107,7 @@ def _selection_loop(movies):
         )
         if item is None:
             return
-        if action == "watch":
+        if action in ("watch", "enter"):
             _do_watch([item["video_url"]], title=item.get("title"))
         elif action == "open":
             open_browser(item["video_url"])
@@ -196,26 +202,166 @@ def cmd_search(query):
     return 0
 
 
-def cmd_new():
-    api = Rutube()
-    cache = Cache(ttl=SEARCH_TTL)
-    seen = {}
-    for q in ("фильм", "кино"):
+def _new_tmdb_subline(m):
+    parts = []
+    if m.get("year"):
+        parts.append(str(m["year"]))
+    if m.get("vote_count"):
+        parts.append(f"{m['vote_average']:.1f}/10")
+    ov = " ".join(str(m.get("overview", "") or "").split())
+    if ov:
+        parts.append(ov[:100] + ("…" if len(ov) > 100 else ""))
+    return " · ".join(parts)
+
+
+def _new_tmdb_loop(items, feed_label):
+    while True:
+        item, action = select(
+            items,
+            title=f"Новинки · TMDB · {feed_label}",
+            line=lambda m: f"{m['title']}"
+            + (f" ({m['year']})" if m.get("year") else ""),
+            subline=_new_tmdb_subline,
+            enter_help="искать на Rutube и смотреть",
+            keys={"i": "детали"},
+        )
+        if item is None:
+            return
+        if action == "i":
+            show_tmdb_detail(console, item)
+            continue
+        title = item.get("title") or ""
+        if not title:
+            continue
+        console.print(f"[bold]{title}[/bold] — ищу на Rutube…")
+        _search_and_select(title, strict=True)
+        return
+
+
+def _new_tmdb(source=None):
+    from . import tmdb
+
+    if source and source in tmdb.FEEDS:
+        feed = tmdb.FEEDS[source]
+    else:
+        feed = "now_playing"
+    cache = Cache(ttl=12 * 3600)
+    client = tmdb.Tmdb()
+    try:
+        movies = tmdb.fetch_movies(cache, client, feed, page=1, limit=12)
+    except tmdb.TmdbError as exc:
+        console.print(f"[red]{exc}[/red]")
+        console.print("[dim]фолбэк на новинки по Rutube…[/dim]")
+        return _new_rutube()
+    if not movies and feed != "popular":
+        console.print("[dim]по TMDB пусто, пробую популярные…[/dim]")
         try:
-            for m in search_rutube_scored(api, cache, q, sort="created", pages=2, strict=True):
-                seen[m["id"]] = m
-        except RutubeError as exc:
-            console.print(f"[red]{exc}[/red]")
-    items = sorted(
-        seen.values(),
-        key=lambda m: (m.get("publication_ts") or "") or (m.get("hits") or 0),
+            movies = tmdb.fetch_movies(cache, client, "popular", page=1, limit=12)
+        except tmdb.TmdbError:
+            movies = []
+    if not movies:
+        console.print("[yellow]новинок не нашлось[/yellow]")
+        return
+    _new_tmdb_loop(movies, tmdb.FEED_LABELS.get(feed, feed))
+
+
+def _is_series_title(title: str) -> bool:
+    """Отсечь серии/сезоны из курируемых лент «Новинки»."""
+    t = str(title or "").lower()
+    if "сериал" in t:
+        return True
+    if re.search(r"\b\d+\s+сери[яе]", t):
+        return True
+    if re.search(r"\b\d+\s+сезон", t):
+        return True
+    if re.search(r"\b(?:series|episode|s\d+\s*е?\d+)\b", t):
+        return True
+    return False
+
+
+def _filter_new_items(raw_items: list[dict], require_year: bool = True) -> list[dict]:
+    """Отфильтровать и дедуплицировать кандидатов новинок."""
+    seen_ids = set()
+    keep = []
+    for item in raw_items:
+        iid = item.get("id")
+        if iid in seen_ids:
+            continue
+        if not is_movie(item):
+            continue
+        if is_bad_result(item.get("title", ""), query="", strict=True):
+            continue
+        title = item.get("title") or ""
+        parsed = parse_description(item.get("description") or "")
+        has_year_signal = bool(title_year(title)) or bool(
+            parsed.get("year") and parsed.get("genres")
+        )
+        if require_year and not has_year_signal:
+            continue
+        seen_ids.add(iid)
+        keep.append(item)
+    ordered = sorted(
+        keep,
+        key=lambda m: (m.get("publication_ts") or "") or "",
         reverse=True,
-    )[:20]
-    movies = to_display_items(items)
+    )
+    unique = []
+    keys = set()
+    for m in ordered:
+        k = _title_key(m.get("title") or "")
+        if k in keys:
+            continue
+        keys.add(k)
+        unique.append(m)
+    return unique
+
+
+def _title_key(text: str) -> str:
+    return "".join(ch for ch in str(text).lower() if ch.isalnum())
+
+
+def _new_rutube(api=None, cache=None, limit=20, source=None):
+    """Новинки по Rutube из курируемых тегов (без TMDB-ключа)."""
+    api = api or Rutube()
+    cache = cache or Cache(ttl=SEARCH_TTL)
+    tag_id = None
+    if source and source in TAG_FEEDS:
+        tag_id = TAG_FEEDS[source]
+    elif source and source in GENRE_TAGS:
+        tag_id = GENRE_TAGS[source]
+    else:
+        tag_id = TAG_FEEDS["new"]
+
+    raw = []
+    try:
+        raw = tag_feed_cached(api, cache, tag_id, pages=2)
+    except RutubeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return
+    raw = [m for m in raw if not _is_series_title(m.get("title", ""))]
+    unique = _filter_new_items(raw, require_year=False)
+    movies = to_display_items(unique[: limit * 3])[:limit]
     if not movies:
         console.print("[yellow]новинок не нашлось[/yellow]")
         return
     _selection_loop(movies)
+
+
+def cmd_new(source=None):
+    if source == "rutube":
+        return _new_rutube()
+    if source in GENRE_TAGS:
+        return _new_rutube(source=source)
+    if source in TAG_FEEDS:
+        return _new_rutube(source=source)
+    if config.load_settings().get("tmdb_api_key", "").strip():
+        return _new_tmdb(source)
+    if source:
+        console.print(
+            f"[dim]TMDB-ключ не задан — источник {source} недоступен. "
+            "Новинки по курируемым тегам Rutube.[/dim]"
+        )
+    return _new_rutube()
 
 
 def cmd_watch(target):
@@ -665,7 +811,17 @@ def main(argv=None):
     p = sub.add_parser("search", help="поиск фильмов")
     p.add_argument("query", nargs="+")
 
-    sub.add_parser("new", help="свежие фильмы")
+    p = sub.add_parser("new", help="свежие фильмы")
+    tmdb_sources = ["now", "now_playing", "popular", "upcoming", "top", "top_rated"]
+    p.add_argument(
+        "source",
+        nargs="?",
+        choices=tmdb_sources
+        + ["rutube"]
+        + list(TAG_FEEDS)
+        + list(GENRE_TAGS),
+        help="источник: TMDB-фиды, курируемые теги Rutube (new/2026/2025/2024) или жанр",
+    )
 
     p = sub.add_parser("marathon", help="марафоны по франшизам")
     p.add_argument("name", nargs="?")
@@ -729,7 +885,7 @@ def main(argv=None):
         elif args.cmd == "search":
             return cmd_search(" ".join(args.query))
         elif args.cmd == "new":
-            cmd_new()
+            cmd_new(getattr(args, "source", None))
         elif args.cmd == "marathon":
             cmd_marathon(args.name, args.watch)
         elif args.cmd == "marathon-queue":

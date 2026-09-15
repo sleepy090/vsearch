@@ -31,6 +31,7 @@ DEFAULT_SETTINGS = {
     "anime4k_upscale_shader": "",
     "auto_select": True,
     "auto_select_threshold": 90,
+    "tmdb_api_key": "",
 }
 
 

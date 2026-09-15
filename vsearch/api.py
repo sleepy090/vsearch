@@ -10,6 +10,30 @@ import requests
 from . import config
 from .scoring import enrich_query, is_bad_result, result_score, year_from_title
 
+TAG_FEEDS = {
+    "new": 8151,  # Новинки (курируемые новые фильмы и сериалы)
+    "2026": 1365207,
+    "2025": 8530,
+    "2024": 7676,
+}
+
+GENRE_TAGS = {
+    "боевики": 2546,
+    "военные": 2547,
+    "детективы": 2548,
+    "документальные": 2549,
+    "драмы": 2550,
+    "исторические": 2551,
+    "комедии": 2552,
+    "мелодрамы": 2553,
+    "приключения": 2555,
+    "семейные": 2556,
+    "триллеры": 2557,
+    "фантастика": 2559,
+    "фэнтези": 2560,
+    "российские": 2971,
+}
+
 BASE = "https://rutube.ru/api"
 HEADERS = {
     "User-Agent": (
@@ -62,6 +86,16 @@ class Rutube:
     def video(self, video_id):
         return self._get(f"/video/{video_id}/", {})
 
+    def tag_feed(self, tag_id, *, sort="tagged_d", page=1, per_page=50):
+        params = {
+            "sort": sort,
+            "page": page,
+            "per_page": per_page,
+            "posters": "true",
+            "show_hidden_videos": "False",
+        }
+        return self._get(f"/tags/video/{tag_id}/", params)
+
 
 def _cache_url(query, sort, page, per_page, duration):
     url = f"/search/video/?query={quote(query)}&sort={sort}&page={page}&per_page={per_page}&format=json"
@@ -79,6 +113,26 @@ def search_cached(api, cache, query, *, sort="rank", page=1, per_page=30, durati
         )
         cache.put(url, data)
     return data
+
+
+def _tag_feed_url(tag_id, sort, page, per_page):
+    return f"/tags/video/{tag_id}/?sort={sort}&page={page}&per_page={per_page}&posters=true&show_hidden_videos=False&format=json"
+
+
+def tag_feed_cached(api, cache, tag_id, *, pages=1, per_page=50, sort="tagged_d"):
+    """Собрать страницы курируемого тега, смержив по id."""
+    seen = {}
+    for page in range(1, pages + 1):
+        url = _tag_feed_url(tag_id, sort, page, per_page)
+        data = cache.get(url)
+        if data is None:
+            data = api.tag_feed(tag_id, sort=sort, page=page, per_page=per_page)
+            cache.put(url, data)
+        for item in data.get("results", []):
+            seen[item["id"]] = item
+        if not data.get("has_next"):
+            break
+    return list(seen.values())
 
 
 def _item_title(item):

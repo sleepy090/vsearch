@@ -17,9 +17,33 @@ python3 -m venv .venv
 ```
 vsearch                      # интерактивное меню (поиск / новинки / марафоны)
 vsearch search <запрос>      # поиск фильмов
-vsearch new                  # свежие фильмы
+vsearch new                  # свежие фильмы (курируемые «Новинки» Rutube)
+vsearch new 2025             # фильмы 2025 года · new/2026/2025/2024
+vsearch new боевики          # по жанру: боевики/комедии/драмы/фантастика…
+vsearch new popular          # TMDB: popular · upcoming · top_rated (если задан ключ)
 vsearch watch <url>          # проиграть конкретный url
 vsearch refresh              # очистить кэш
+```
+
+### Новинки
+
+По умолчанию `vsearch new` показывает курируемый раздел Rutube «Новинки»
+(«Новые фильмы и сериалы») — реальные свежие релизы без всяких ключей.
+Доступны теги-источники: `new`, `2026`, `2025`, `2024` и жанры
+(`боевики`, `комедии`, `драмы`, `фантастика`, `триллеры`, …).
+Серии и кликбейт отсекаются.
+
+Если задан TMDB-ключ, `vsearch new popular/upcoming/top_rated/now`
+берёт списки с TMDB и ищет каждый фильм на Rutube.
+
+TMDB нужен бесплатный API-ключ. Получи его на
+<https://www.themoviedb.org/settings/api> и добавь в настройки:
+
+```bash
+# ~/.config/vsearch/settings.json
+{
+  "tmdb_api_key": "твой_ключ"
+}
 ```
 
 ### Марафоны

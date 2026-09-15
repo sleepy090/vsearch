@@ -171,15 +171,15 @@ def select(
         transient=True,
         auto_refresh=False,
     ) as live:
-        live.update(Group(render(), help_bar()))
+        live.update(Group(render(), help_bar()), refresh=True)
         while True:
             key = read_key()
             if key == _KEY_UP:
                 index = (index - 1) % total
-                live.update(Group(render(), help_bar()))
+                live.update(Group(render(), help_bar()), refresh=True)
             elif key == _KEY_DOWN:
                 index = (index + 1) % total
-                live.update(Group(render(), help_bar()))
+                live.update(Group(render(), help_bar()), refresh=True)
             elif key == _KEY_ENTER:
                 return items[index], _KEY_ENTER
             elif key in keys:

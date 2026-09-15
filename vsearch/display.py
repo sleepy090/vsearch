@@ -224,3 +224,24 @@ def show_info_card(console, query, meta):
         if val:
             lines.append(f"[{CYAN}]{label}:[/{CYAN}] {escape(str(val))}")
     console.print(Panel("\n".join(lines), title="Карточка", border_style=MAUVE))
+
+
+def show_tmdb_detail(console, m):
+    title = escape(m.get("title", ""))
+    console.print(f"\n[bold {LAVENDER}]{title}[/bold {LAVENDER}]")
+    if m.get("year"):
+        console.print(f"[{CYAN}]Год:[/{CYAN}] {m['year']}")
+    if m.get("original_title") and m["original_title"] != m.get("title"):
+        console.print(f"[{CYAN}]Оригинал:[/{CYAN}] {escape(m['original_title'])}")
+    if m.get("release_date"):
+        console.print(f"[{CYAN}]Релиз:[/{CYAN}] {escape(m['release_date'])}")
+    if m.get("vote_count"):
+        console.print(
+            f"[{CYAN}]Рейтинг:[/{CYAN}] {m.get('vote_average') or '—'} "
+            f"({m['vote_count']} голосов)"
+        )
+    if m.get("poster"):
+        console.print(f"[{DIM}]постер:[/{DIM}] https://image.tmdb.org/t/p/w400{m['poster']}")
+    desc = m.get("overview", "")
+    if desc:
+        console.print(Panel(escape(desc), title="Описание", border_style=DIM))
